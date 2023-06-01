@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	penaltyRe      = `Decision\n\n(?P<Penalty>[\s\S]*?){1}\n\n`
+	factPenaltyRe  = `Fact\n\n(?P<Fact>[\s\S]*?){1}\n\nOffence[\s\S]*?Decision\n\n(?P<Penalty>[\s\S]*?){1}\n\n`
 	replacementsRe = `(Number\n\nCar\n\nDriver\n\n(?P<DriverNumber>(?:[0-9][0-9]\n)+)[\s\S]*?Previously used\s*[\s\S]*?(?P<EnginePart>[^\n]+))+`
 	numberReg      = `Car (?P<Number>[0-9][0-9])`
 )
@@ -21,7 +21,7 @@ func main() {
 	number := regexp.MustCompile(numberReg).FindStringSubmatch(offenceFilename)[1]
 
 	filename := offenceFilename
-	rgx := penaltyRe
+	rgx := factPenaltyRe
 
 	// to convert from HTTP response:
 	// docconv.Convert(resp.Body, "application/pdf", true)
@@ -42,6 +42,10 @@ func main() {
 			log.Printf("driver(s) %s requested a new %s", strings.Join(drivers, ", "), s[3])
 		}
 	} else {
-		log.Printf("driver %s has been given the following penalty: %s", number, re.FindStringSubmatch(res.Body)[1])
+		factNPenalty := re.FindAllStringSubmatch(res.Body, -1)
+		fact := factNPenalty[0][1]
+		penalty := factNPenalty[0][2]
+		log.Printf("the fact: \"%s\" lead driver no. %s being given the following penalty: \"%s\"",
+			fact, number, penalty)
 	}
 }
