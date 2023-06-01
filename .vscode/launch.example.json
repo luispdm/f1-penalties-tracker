@@ -1,0 +1,38 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Go scraper",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/scraper/main.go",
+            "args": ["-c", "config.yml"]
+        },
+        {
+            "name": "Go parser",
+            "type": "go",
+            "request": "launch",
+            "mode": "debug",
+            "program": "${workspaceFolder}/parser/main.go",
+            "env": {
+                "CONFIG": "{key: 'value'}"
+            }
+        },
+        {
+            "name": "Go Tests",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${workspaceRoot}/somehwere/to/test",
+            "args": [
+                "-test.v",
+                "-race",
+                "-test.count",
+                "1",
+                "-test.run",
+                "TestSomething"
+            ]
+          }
+    ]
+}
