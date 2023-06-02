@@ -18,7 +18,9 @@ const (
 	ua            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 	// up to now needed in order to be consistent: when offences occur after up to now is published,
 	// parts counter can't be increased because natural language is not processed
-	// RNC issues | allocations ?
+	
+	// RNC issues | allocations : Friday's bonus allocations - up to 4 (they don't count toward the limit).
+	// Retrieve the note from the pdf and store it as a comment
 )
 
 func main() {
