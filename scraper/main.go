@@ -12,13 +12,13 @@ import (
 const (
 	here          = `https://www.fia.com/documents/championships/fia-formula-one-world-championship-14/season/season-2022-2005/event/Belgian%20Grand%20Prix/`
 	linksSelector = "li.document-row a"
-	offenceRe     = `(Offence|Decision) - Car [0-9]{1,2} - (PU elements|RNC Changes)`
-	newElemsRe    = `New (PU elements|RNCs)`
-	upToNowRe     = `(PU elements|RNCs) used per driver up to now`
+	offenceRe     = `(?i)(Offence|Decision|Infringement) - Car [0-9]{1,2} - (PU elements|RNC changes)`
+	newElemsRe    = `(?i)New (PU elements|RNCs)`
+	upToNowRe     = `(?i)(PU elements|RNCs) used per driver up to now`
 	ua            = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36"
 	// up to now needed in order to be consistent: when offences occur after up to now is published,
 	// parts counter can't be increased because natural language is not processed
-	
+
 	// RNC issues | allocations : Friday's bonus allocations - up to 4 (they don't count toward the limit).
 	// Retrieve the note from the pdf and store it as a comment
 )
