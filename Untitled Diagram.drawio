@@ -1,9 +1,121 @@
-<mxfile host="app.diagrams.net" modified="2023-06-16T14:45:44.051Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36" version="21.4.0" etag="N5c7Mqfsa8Ody0dB8oog" type="github">
+<mxfile host="app.diagrams.net" modified="2023-06-16T15:22:16.433Z" agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36" etag="x3MCekeu1DGaH5FhP0gt" version="21.4.0" type="github">
   <diagram name="Page-1" id="dqt_fYkGginoOhiHcgfV">
-    <mxGraphModel>
+    <mxGraphModel dx="1219" dy="1142" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
+        <mxCell id="CbP5YbpC93A33hKROAdr-5" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;exitX=0.45;exitY=1.032;exitDx=0;exitDy=0;exitPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-1" target="CbP5YbpC93A33hKROAdr-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-6" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;2. Check duplicates&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-5">
+          <mxGeometry x="0.1857" y="1" relative="1" as="geometry">
+            <mxPoint x="30" y="-13" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;fontSize=14;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-1" target="CbP5YbpC93A33hKROAdr-7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-11" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;3. Non-duplicated URLs&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-9">
+          <mxGeometry x="0.2667" y="-3" relative="1" as="geometry">
+            <mxPoint x="25" y="3" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-25" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0;exitDx=0;exitDy=0;entryX=0.917;entryY=0.8;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-1" target="CbP5YbpC93A33hKROAdr-21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-26" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;1. Retrieve relevant URLs&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-25">
+          <mxGeometry x="0.0977" y="2" relative="1" as="geometry">
+            <mxPoint y="8" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-1" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;Scraper&lt;/font&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="670" y="370" width="120" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-2" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;NoSQL&lt;/font&gt;" style="shape=datastore;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="550" width="90" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-7" target="CbP5YbpC93A33hKROAdr-12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-20" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;4. URLs&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-13">
+          <mxGeometry x="0.1857" y="-3" relative="1" as="geometry">
+            <mxPoint x="13" y="3" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-7" value="Queue" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;strokeColor=#232F3E;fillColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=12;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.queue;" vertex="1" parent="1">
+          <mxGeometry x="390" y="385" width="90" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-22" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-12" target="CbP5YbpC93A33hKROAdr-21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-23" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;5. Download documents&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-22">
+          <mxGeometry x="0.1647" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-38" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0;entryY=0.642;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-12" target="CbP5YbpC93A33hKROAdr-36">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-39" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;7. Send penalties &amp;amp; used parts (gRPC)&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-38">
+          <mxGeometry x="-0.0184" y="-1" relative="1" as="geometry">
+            <mxPoint x="21" y="-15" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-12" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;Downloader &amp;amp; parser&lt;/font&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="130" y="370" width="120" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-21" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;FIA.com&lt;/font&gt;" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="375" y="160" width="120" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-34" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.667;entryY=1;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-12" target="CbP5YbpC93A33hKROAdr-12">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="160" y="530" />
+              <mxPoint x="210" y="530" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-35" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;6. Parse documents&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-34">
+          <mxGeometry x="-0.1003" y="-1" relative="1" as="geometry">
+            <mxPoint x="12" y="9" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-40" style="rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0;exitDx=0;exitDy=0;entryX=0.022;entryY=0.789;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-36" target="CbP5YbpC93A33hKROAdr-2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-45" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;9. PUT recently-processed URLs&lt;br&gt;&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-40">
+          <mxGeometry x="-0.1486" y="-1" relative="1" as="geometry">
+            <mxPoint x="21" y="-2" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-43" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=-0.017;entryY=0.551;entryDx=0;entryDy=0;entryPerimeter=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-36" target="CbP5YbpC93A33hKROAdr-41">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-44" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;8.&amp;nbsp; PUT new penalties &amp;amp; parts&lt;br&gt;&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-43">
+          <mxGeometry x="-0.1172" relative="1" as="geometry">
+            <mxPoint as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-36" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;Backend&lt;/font&gt;" style="whiteSpace=wrap;html=1;aspect=fixed;" vertex="1" parent="1">
+          <mxGeometry x="150" y="680" width="120" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-41" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;Postgres-compatible DB&lt;/font&gt;" style="shape=datastore;whiteSpace=wrap;html=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="690" width="90" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" edge="1" parent="1" source="CbP5YbpC93A33hKROAdr-46" target="CbP5YbpC93A33hKROAdr-36">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-50" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;&quot;Gimme the status of the championship at race X&quot; (graphQL)&lt;/font&gt;" style="edgeLabel;html=1;align=center;verticalAlign=middle;resizable=0;points=[];" vertex="1" connectable="0" parent="CbP5YbpC93A33hKROAdr-47">
+          <mxGeometry x="0.2784" y="-2" relative="1" as="geometry">
+            <mxPoint x="13" y="28" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-46" value="Actor" style="shape=umlActor;verticalLabelPosition=bottom;verticalAlign=top;html=1;outlineConnect=0;" vertex="1" parent="1">
+          <mxGeometry x="195" y="970" width="30" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="CbP5YbpC93A33hKROAdr-52" value="&lt;font style=&quot;font-size: 14px;&quot;&gt;The user part is part of the read flow (to be moved to another diagram)&lt;/font&gt;" style="whiteSpace=wrap;html=1;shape=mxgraph.basic.cloud_rect" vertex="1" parent="1">
+          <mxGeometry x="280" y="940" width="120" height="90" as="geometry" />
+        </mxCell>
       </root>
     </mxGraphModel>
   </diagram>
