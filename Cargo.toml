@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/ingest",
+    "crates/store",
+    "crates/api",
+    "bins/server",
+    "bins/ingest-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+
+# Dependencies land with the epic that first needs them, never here up front:
+# pdfium-render (E2), sqlx (store, E1), axum + utoipa (api, E6).
+[workspace.dependencies]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+# rust-best-practices ch. 2.3 lints that clippy::all leaves off (nursery/pedantic).
+# needless_borrow, manual_ok_or, large_enum_variant, clone_on_copy already ride in `all`.
+redundant_clone = "warn"    # nursery+perf: needless clones
+needless_collect = "warn"   # nursery: pointless allocation
+map_unwrap_or = "warn"      # pedantic: .map().unwrap_or() -> .map_or()
+unnecessary_wraps = "warn"  # pedantic: always-Some/Ok returns
