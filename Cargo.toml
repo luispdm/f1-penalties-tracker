@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/domain",
+    "crates/ingest",
+    "crates/store",
+    "crates/api",
+    "bins/server",
+    "bins/ingest-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+
+# Dependencies land with the epic that first needs them, never here up front:
+# pdfium-render (E2), sqlx (store, E1), axum + utoipa (api, E6).
+[workspace.dependencies]
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

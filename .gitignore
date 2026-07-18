@@ -1,5 +1,6 @@
 .DS_Store
 *.pdf
+/target
 .vscode/launch.json
 .vscode/settings.json
 PLAN.md
