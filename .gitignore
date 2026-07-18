@@ -3,3 +3,7 @@
 .vscode/launch.json
 .vscode/settings.json
 PLAN.md
+
+# reviewer GitHub App
+.claude/reviewer-app.env
+*.pem

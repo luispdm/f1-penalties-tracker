@@ -88,7 +88,7 @@ If the input is ambiguous, grill the user before doing anything.
     ```
     PR body:
     - One-line summary.
-    - "Relates to #NN, part of epic #M." **No closing keyword** — the issue is closed and moved to `Done` by a human after merge.
+    - "Relates to #NN, part of epic #M." **No closing keyword** — the reviewer (or a human) closes the issue and moves it to `Done` after merge.
     - One line per implementation decision, each linking to its issue comment (see below).
     - Test plan: a checklist for the reviewer.
     - The standard "Generated with Claude Code" footer is acceptable.
@@ -105,7 +105,7 @@ If the input is ambiguous, grill the user before doing anything.
    gh api repos/luispdm/f1-penalties-tracker/pulls/N/comments      # inline review comments
    gh api repos/luispdm/f1-penalties-tracker/issues/N/comments     # PR-level comments
    ```
-   Reviews come from a human, so `reviewDecision` and the review bodies are meaningful — read them normally. Distinguish addressed vs open comments by existing replies in the thread.
+   Reviews come from a human or from the reviewer agent, so `reviewDecision` and the review bodies are meaningful — read them normally. Distinguish addressed vs open comments by existing replies in the thread.
 
 2. **Check out the PR branch.**
    ```
