@@ -23,13 +23,11 @@ jobs:
   # it silently detaches the gate, so leave it alone.
   ci:
     runs-on: ubuntu-latest
-    # Runs take ~2 min on an empty workspace. Raise when pdfium (E2) and the
-    # Postgres service (E1) land, rather than inheriting the 360 minute default.
+    # Runs take ~2 min on an empty workspace. Timeout to be reviewed when pdf extraction
+    # and database service land
     timeout-minutes: 15
     steps:
-      # Actions are pinned to commit SHAs: tags are mutable and the owner can move
-      # them. Bump by hand, keeping the trailing comment in step with the SHA.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@v7
 
       # No version here: rustup reads rust-toolchain.toml. One pin, one place.
       - name: Install toolchain
@@ -37,12 +35,11 @@ jobs:
           rustup toolchain install --no-self-update
           rustup show active-toolchain
 
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --all --check
 
-      # --locked fails the run on a stale Cargo.lock instead of silently rewriting it.
       - name: Clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
