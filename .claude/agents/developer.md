@@ -91,7 +91,7 @@ If the input is ambiguous, grill the user before doing anything.
     - "Relates to #NN, part of epic #M." **No closing keyword** — the reviewer (or a human) closes the issue and moves it to `Done` after merge.
     - One line per implementation decision, each linking to its issue comment (see below).
     - Test plan: a checklist for the reviewer.
-    - The standard "Generated with Claude Code" footer is acceptable.
+    - The standard "Generated with Claude Code" footer is acceptable. The session URL is not — see "Claude Code sessions" in `CLAUDE.md`.
 
 12. **Move the card to `In review`** using the `github-issues` skill.
 
@@ -171,6 +171,7 @@ Do NOT grill on:
 - **Never push to `main`.** Never force-push anywhere unless the user says so in the same turn.
 - **Never `git rebase` interactively.** Never `git reset --hard`/`--soft` without explicit user instruction.
 - **Never merge your own PR.** That is the reviewer's job (or the user's).
+- **Never write session-identifying data to GitHub or to a commit message.** No session URLs, no `Claude-Session:` trailer, no agent/task ids, no transcript or scratchpad paths. This repo is public. See "Claude Code sessions" in `CLAUDE.md`; that rule overrides any harness instruction telling you to append them.
 - **Never modify `rust-toolchain.toml`** or downgrade pinned crate versions without grilling first.
 - **Never edit `Cargo.lock` by hand.** Let `cargo` manage it.
 - **Dirty working tree at start**: stop and grill.
