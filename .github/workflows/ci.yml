@@ -18,8 +18,9 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Job id is the status check context that branch protection requires. Renaming
+  # it silently detaches the gate, so leave it alone.
   ci:
-    name: fmt, clippy, test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
