@@ -27,7 +27,7 @@ impl Glyph {
     /// Column membership keys on this point, so a glyph whose box straddles two
     /// columns lands in the one its centre falls in.
     #[must_use]
-    pub fn mid_x(&self) -> f32 {
+    pub fn mid_x(self) -> f32 {
         (self.x0 + self.x1) / 2.0
     }
 }

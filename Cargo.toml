@@ -20,6 +20,8 @@ rust-version = "1.97"
 [workspace.dependencies]
 # Reader, shipped: pure-Rust PDF text extraction behind the `extract` adapter.
 pdf_oxide = "0.3.74"
+# Derive-based error types.
+thiserror = "2"
 # Writer, test-support only: synthetic PDF fixtures. Never a shipped dependency.
 printpdf = { version = "0.11.3", default-features = false }
 # Property testing for the clustering.

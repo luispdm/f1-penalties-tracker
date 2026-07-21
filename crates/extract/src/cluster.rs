@@ -50,7 +50,7 @@ pub fn cluster(glyphs: &[Glyph], config: &ClusterConfig) -> Grid {
     }
 
     // Columns: cluster midpoints ascending, so column 0 is leftmost.
-    let mid_x: Vec<f32> = glyphs.iter().map(Glyph::mid_x).collect();
+    let mid_x: Vec<f32> = glyphs.iter().map(|g| g.mid_x()).collect();
     let col_of = cluster_1d(&mid_x, config.column_gap, Order::Ascending);
     let col_count = cluster_count(&col_of);
 
