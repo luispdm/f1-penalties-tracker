@@ -1,1 +1,1 @@
-//! Ingest layer: scrape, fetch, pdfium extraction, parse.
+//! Ingest layer: scrape, fetch, pdf extraction, parse.
