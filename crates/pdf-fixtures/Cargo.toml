@@ -1,0 +1,16 @@
+[package]
+name = "pdf-fixtures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+# Test-support only: writes synthetic PDF fixtures with printpdf, an
+# independent codebase from the pdf_oxide reader under test. Nothing that
+# ships depends on this crate.
+
+[dependencies]
+printpdf = { workspace = true }
+
+[lints]
+workspace = true

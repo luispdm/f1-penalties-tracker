@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+extract = { path = "../extract" }
 
 [lints]
 workspace = true

@@ -1,5 +1,7 @@
 .DS_Store
 *.pdf
+# Synthetic, non-FIA test fixtures are committed. FIA PDFs never are.
+!crates/pdf-fixtures/fixtures/*.pdf
 /target
 .vscode/launch.json
 .vscode/settings.json

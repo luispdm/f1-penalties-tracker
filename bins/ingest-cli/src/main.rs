@@ -1,3 +1,3 @@
-//! Ingest CLI: scoped idempotent ingest command, run by the scheduler. E5 wires it.
+//! Ingest CLI: scoped idempotent ingest command, run by the scheduler.
 
 fn main() {}
