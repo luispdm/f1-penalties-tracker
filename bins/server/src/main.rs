@@ -1,3 +1,3 @@
-//! Server binary: `axum::serve`. E6 wires it.
+//! Server binary: `axum::serve`.
 
 fn main() {}
