@@ -1,11 +1,14 @@
 [package]
-name = "ingest"
+name = "extract"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-extract = { path = "../extract" }
+pdf_oxide = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
 
 [lints]
 workspace = true

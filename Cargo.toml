@@ -2,9 +2,11 @@
 resolver = "3"
 members = [
     "crates/domain",
+    "crates/extract",
     "crates/ingest",
     "crates/store",
     "crates/api",
+    "crates/pdf-fixtures",
     "bins/server",
     "bins/ingest-cli",
 ]
@@ -14,9 +16,14 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 
-# Dependencies land with the epic that first needs them, never here up front:
-# pdfium-render (E2), sqlx (store, E1), axum + utoipa (api, E6).
+# Dependencies land with the epic that first needs them, never here up front.
 [workspace.dependencies]
+# Reader, shipped: pure-Rust PDF text extraction behind the `extract` adapter.
+pdf_oxide = "0.3.74"
+# Writer, test-support only: synthetic PDF fixtures. Never a shipped dependency.
+printpdf = { version = "0.11.3", default-features = false }
+# Property testing for the clustering.
+proptest = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
