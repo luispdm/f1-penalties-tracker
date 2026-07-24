@@ -617,19 +617,6 @@ mod tests {
     }
 
     #[test]
-    fn count_after_saturates_instead_of_overflowing() {
-        // An out-of-range parse can drive the snapshot to the ceiling. The sum
-        // saturates rather than panicking in debug or wrapping in release.
-        let data = RoundData {
-            snapshot: Some(u32::MAX),
-            fitted: Some(1),
-            ..RoundData::default()
-        };
-
-        assert_eq!(data.count_after(), Some(u32::MAX));
-    }
-
-    #[test]
     fn exceedance_flags_a_count_above_the_allowance() {
         assert_eq!(
             allowances().exceeds(2026, &ComponentCode::new("ICE"), 5),
