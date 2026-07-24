@@ -22,27 +22,27 @@ use crate::fact::{ComponentCode, Season};
 /// than assuming a default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Allowances {
-    by_season_component: BTreeMap<(Season, ComponentCode), u32>,
+    by_season: BTreeMap<Season, BTreeMap<ComponentCode, u32>>,
 }
 
 impl Allowances {
     /// Build an allowance table from `(season, component, allowance)` rows.
     pub fn from_rows(rows: impl IntoIterator<Item = (Season, ComponentCode, u32)>) -> Self {
-        Self {
-            by_season_component: rows
-                .into_iter()
-                .map(|(season, component, allowance)| ((season, component), allowance))
-                .collect(),
+        let mut by_season: BTreeMap<Season, BTreeMap<ComponentCode, u32>> = BTreeMap::new();
+        for (season, component, allowance) in rows {
+            by_season
+                .entry(season)
+                .or_default()
+                .insert(component, allowance);
         }
+        Self { by_season }
     }
 
     /// The permitted count for a component in a season, or `None` when the
     /// component is not seeded for that season.
     #[must_use]
     pub fn allowance(&self, season: Season, component: &ComponentCode) -> Option<u32> {
-        self.by_season_component
-            .get(&(season, component.clone()))
-            .copied()
+        self.by_season.get(&season)?.get(component).copied()
     }
 
     /// Whether `count` exceeds the allowance: the single domain rule.
