@@ -174,8 +174,8 @@ pub fn sweep(facts: &[Fact], allowances: &Allowances) -> Vec<Conflict> {
     let timelines = fold_live_facts(facts);
 
     let mut conflicts = Vec::new();
-    conflicts.extend(unknown_components(&timelines, allowances));
-    conflicts.extend(timeline_conflicts(&timelines, allowances));
+    conflicts.extend(local_conflicts(&timelines, allowances));
+    conflicts.extend(snapshot_disagreements(&timelines));
     conflicts.extend(penalized_set_conflicts(&timelines));
     conflicts
 }
@@ -195,91 +195,109 @@ fn fold_live_facts(facts: &[Fact]) -> BTreeMap<Series, BTreeMap<u8, RoundData>> 
     timelines
 }
 
-/// One conflict per `(season, component)` the ruleset does not seed.
-fn unknown_components(
-    timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>,
-    allowances: &Allowances,
-) -> Vec<Conflict> {
-    timelines
-        .keys()
-        .map(|(season, _car, component)| (*season, component))
-        .filter(|(season, component)| allowances.allowance(*season, component).is_none())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(|(season, component)| Conflict::UnknownComponent {
-            season,
-            component: component.clone(),
-        })
-        .collect()
-}
-
-/// The per-timeline equations: previously-used, stated exceedance, ordinal, and
-/// consecutive-snapshot agreement.
-fn timeline_conflicts(
+/// Flag the conflicts one event proves on its own: an unseeded component, a
+/// previously-used figure that disagrees with the snapshot, a stated conformity
+/// that disagrees with the computed exceedance, and a stated ordinal that
+/// disagrees with the count after the event.
+///
+/// One flat pass over every `(series, round)` cell. Each unseeded
+/// `(season, component)` yields one `UnknownComponent`, however many events
+/// reference it.
+fn local_conflicts(
     timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>,
     allowances: &Allowances,
 ) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
+    let mut seen_unknown: BTreeSet<(u16, ComponentCode)> = BTreeSet::new();
+
+    let cells = timelines
+        .iter()
+        .flat_map(|((season, car, component), rounds)| {
+            rounds
+                .iter()
+                .map(move |(round, data)| (*season, *car, component, *round, data))
+        });
+
+    for (season, car, component, round, data) in cells {
+        if allowances.allowance(season, component).is_none()
+            && seen_unknown.insert((season, component.clone()))
+        {
+            conflicts.push(Conflict::UnknownComponent {
+                season,
+                component: component.clone(),
+            });
+        }
+
+        let count_after = data.count_after();
+
+        if let (Some(previously_used), Some(snapshot)) = (data.previously_used, data.snapshot)
+            && previously_used != snapshot
+        {
+            conflicts.push(Conflict::PreviouslyUsedMismatch {
+                season,
+                car,
+                component: component.clone(),
+                round,
+                previously_used,
+                snapshot,
+            });
+        }
+
+        if let (Some(conformity), Some(count_after)) = (data.conformity, count_after)
+            && let Some(computed_exceeds) = allowances.exceeds(season, component, count_after)
+        {
+            let stated_not_in_conformity = conformity == Conformity::NotInConformity;
+            if stated_not_in_conformity != computed_exceeds {
+                conflicts.push(Conflict::StatedExceedanceMismatch {
+                    season,
+                    car,
+                    component: component.clone(),
+                    round,
+                    stated_not_in_conformity,
+                    computed_exceeds,
+                });
+            }
+        }
+
+        if let (Some(stated_ordinal), Some(count_after)) = (data.stated_ordinal, count_after)
+            && stated_ordinal != count_after
+        {
+            conflicts.push(Conflict::OrdinalMismatch {
+                season,
+                car,
+                component: component.clone(),
+                round,
+                stated_ordinal,
+                count_after,
+            });
+        }
+    }
+
+    conflicts
+}
+
+/// Flag every adjacent event pair whose count after the earlier event disagrees
+/// with the later event's snapshot.
+///
+/// One `windows(2)` over each timeline's present events, already sorted by the
+/// map. A missing round leaves the events it separates adjacent; the sweep
+/// checks the events it holds, not the rounds it lacks.
+fn snapshot_disagreements(timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>) -> Vec<Conflict> {
+    let mut conflicts = Vec::new();
     for ((season, car, component), rounds) in timelines {
-        let (season, car) = (*season, *car);
-        let ordered: Vec<u8> = rounds.keys().copied().collect();
-        for (index, &round) in ordered.iter().enumerate() {
-            let data = &rounds[&round];
-            let count_after = data.count_after();
-
-            if let (Some(previously_used), Some(snapshot)) = (data.previously_used, data.snapshot)
-                && previously_used != snapshot
-            {
-                conflicts.push(Conflict::PreviouslyUsedMismatch {
-                    season,
-                    car,
-                    component: component.clone(),
-                    round,
-                    previously_used,
-                    snapshot,
-                });
-            }
-
-            if let (Some(conformity), Some(count_after)) = (data.conformity, count_after)
-                && let Some(computed_exceeds) = allowances.exceeds(season, component, count_after)
-            {
-                let stated_not_in_conformity = conformity == Conformity::NotInConformity;
-                if stated_not_in_conformity != computed_exceeds {
-                    conflicts.push(Conflict::StatedExceedanceMismatch {
-                        season,
-                        car,
-                        component: component.clone(),
-                        round,
-                        stated_not_in_conformity,
-                        computed_exceeds,
-                    });
-                }
-            }
-
-            if let (Some(stated_ordinal), Some(count_after)) = (data.stated_ordinal, count_after)
-                && stated_ordinal != count_after
-            {
-                conflicts.push(Conflict::OrdinalMismatch {
-                    season,
-                    car,
-                    component: component.clone(),
-                    round,
-                    stated_ordinal,
-                    count_after,
-                });
-            }
-
-            if let Some(&next) = ordered.get(index + 1)
-                && let (Some(count_after), Some(next_snapshot)) =
-                    (count_after, rounds[&next].snapshot)
+        let ordered: Vec<(&u8, &RoundData)> = rounds.iter().collect();
+        for pair in ordered.windows(2) {
+            let (&from_round, from) = pair[0];
+            let (&to_round, to) = pair[1];
+            if let (Some(count_after), Some(next_snapshot)) = (from.count_after(), to.snapshot)
                 && count_after != next_snapshot
             {
                 conflicts.push(Conflict::SnapshotDisagreement {
-                    season,
-                    car,
+                    season: *season,
+                    car: *car,
                     component: component.clone(),
-                    from_round: round,
-                    to_round: next,
+                    from_round,
+                    to_round,
                     count_after,
                     next_snapshot,
                 });
@@ -290,47 +308,54 @@ fn timeline_conflicts(
 }
 
 /// The per-event equation: penalized elements equal the not-in-conformity set.
+///
+/// One map groups both sets per `(season, round)`. An event surfaces when its
+/// two sets differ.
 fn penalized_set_conflicts(timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>) -> Vec<Conflict> {
-    let mut penalized: BTreeMap<(u16, u8), BTreeSet<(u16, ComponentCode)>> = BTreeMap::new();
-    let mut not_in_conformity: BTreeMap<(u16, u8), BTreeSet<(u16, ComponentCode)>> =
-        BTreeMap::new();
+    #[derive(Default)]
+    struct EventSets {
+        penalized: BTreeSet<(u16, ComponentCode)>,
+        not_in_conformity: BTreeSet<(u16, ComponentCode)>,
+    }
+
+    let mut events: BTreeMap<(u16, u8), EventSets> = BTreeMap::new();
     for ((season, car, component), rounds) in timelines {
         for (round, data) in rounds {
             if data.penalized {
-                penalized
+                events
                     .entry((*season, *round))
                     .or_default()
+                    .penalized
                     .insert((*car, component.clone()));
             }
             if data.conformity == Some(Conformity::NotInConformity) {
-                not_in_conformity
+                events
                     .entry((*season, *round))
                     .or_default()
+                    .not_in_conformity
                     .insert((*car, component.clone()));
             }
         }
     }
 
-    let events: BTreeSet<(u16, u8)> = penalized
-        .keys()
-        .chain(not_in_conformity.keys())
-        .copied()
-        .collect();
     events
         .into_iter()
-        .filter_map(|event| {
-            let penalized = penalized.get(&event).cloned().unwrap_or_default();
-            let not_in_conformity = not_in_conformity.get(&event).cloned().unwrap_or_default();
-            (penalized != not_in_conformity).then(|| {
-                let (season, round) = event;
-                Conflict::PenalizedSetMismatch {
+        .filter_map(
+            |(
+                (season, round),
+                EventSets {
+                    penalized,
+                    not_in_conformity,
+                },
+            )| {
+                (penalized != not_in_conformity).then_some(Conflict::PenalizedSetMismatch {
                     season,
                     round,
                     penalized,
                     not_in_conformity,
-                }
-            })
-        })
+                })
+            },
+        )
         .collect()
 }
 
