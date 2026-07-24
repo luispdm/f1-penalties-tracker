@@ -158,7 +158,7 @@ impl RoundData {
     /// restated ordinal never does. `None` when no snapshot anchors the event.
     fn count_after(&self) -> Option<u32> {
         self.snapshot
-            .map(|snapshot| snapshot + self.fitted.unwrap_or(0))
+            .map(|snapshot| snapshot.saturating_add(self.fitted.unwrap_or(0)))
     }
 }
 
@@ -614,6 +614,19 @@ mod tests {
         facts.push(snapshot(3, 16, "ICE", 99));
 
         assert!(!sweep(&facts, &allowances()).is_empty());
+    }
+
+    #[test]
+    fn count_after_saturates_instead_of_overflowing() {
+        // An out-of-range parse can drive the snapshot to the ceiling. The sum
+        // saturates rather than panicking in debug or wrapping in release.
+        let data = RoundData {
+            snapshot: Some(u32::MAX),
+            fitted: Some(1),
+            ..RoundData::default()
+        };
+
+        assert_eq!(data.count_after(), Some(u32::MAX));
     }
 
     #[test]
