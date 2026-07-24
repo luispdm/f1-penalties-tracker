@@ -12,7 +12,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::fact::ComponentCode;
+use crate::fact::{ComponentCode, Season};
 
 /// The seeded allowance table: a season and component code map to a permitted
 /// count.
@@ -22,12 +22,12 @@ use crate::fact::ComponentCode;
 /// than assuming a default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Allowances {
-    by_season_component: BTreeMap<(u16, ComponentCode), u32>,
+    by_season_component: BTreeMap<(Season, ComponentCode), u32>,
 }
 
 impl Allowances {
     /// Build an allowance table from `(season, component, allowance)` rows.
-    pub fn from_rows(rows: impl IntoIterator<Item = (u16, ComponentCode, u32)>) -> Self {
+    pub fn from_rows(rows: impl IntoIterator<Item = (Season, ComponentCode, u32)>) -> Self {
         Self {
             by_season_component: rows
                 .into_iter()
@@ -39,7 +39,7 @@ impl Allowances {
     /// The permitted count for a component in a season, or `None` when the
     /// component is not seeded for that season.
     #[must_use]
-    pub fn allowance(&self, season: u16, component: &ComponentCode) -> Option<u32> {
+    pub fn allowance(&self, season: Season, component: &ComponentCode) -> Option<u32> {
         self.by_season_component
             .get(&(season, component.clone()))
             .copied()
@@ -51,7 +51,7 @@ impl Allowances {
     /// it. Returns `None` when the component is not seeded for the season, so a
     /// caller cannot mistake an unknown component for a compliant one.
     #[must_use]
-    pub fn exceeds(&self, season: u16, component: &ComponentCode, count: u32) -> Option<bool> {
+    pub fn exceeds(&self, season: Season, component: &ComponentCode, count: u32) -> Option<bool> {
         self.allowance(season, component)
             .map(|allowance| count > allowance)
     }

@@ -18,5 +18,5 @@ mod fact;
 mod sweep;
 
 pub use allowance::Allowances;
-pub use fact::{Claim, ComponentCode, Conformity, Fact};
+pub use fact::{Car, Claim, ComponentCode, Conformity, Fact, Round, Season};
 pub use sweep::{Conflict, sweep};

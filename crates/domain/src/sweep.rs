@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     allowance::Allowances,
-    fact::{Claim, ComponentCode, Conformity, Fact},
+    fact::{Car, Claim, ComponentCode, Conformity, Fact, Round, Season},
 };
 
 /// A disagreement the sweep found between independent witnesses.
@@ -40,15 +40,15 @@ pub enum Conflict {
     /// The count after one event does not equal the next event's snapshot.
     SnapshotDisagreement {
         /// The season the components belong to.
-        season: u16,
+        season: Season,
         /// The car number.
-        car: u16,
+        car: Car,
         /// The component whose totals clash.
         component: ComponentCode,
         /// The event whose computed count-after is under test.
-        from_round: u8,
+        from_round: Round,
         /// The following event whose snapshot should match.
-        to_round: u8,
+        to_round: Round,
         /// The computed count after `from_round`.
         count_after: u32,
         /// The snapshot the following event states.
@@ -58,13 +58,13 @@ pub enum Conflict {
     /// prior snapshot.
     PreviouslyUsedMismatch {
         /// The season the components belong to.
-        season: u16,
+        season: Season,
         /// The car number.
-        car: u16,
+        car: Car,
         /// The component whose figures clash.
         component: ComponentCode,
         /// The event the document belongs to.
-        round: u8,
+        round: Round,
         /// The "previously used" figure the document states.
         previously_used: u32,
         /// The snapshot for the same event.
@@ -74,13 +74,13 @@ pub enum Conflict {
     /// count-over-allowance flag.
     StatedExceedanceMismatch {
         /// The season the components belong to.
-        season: u16,
+        season: Season,
         /// The car number.
-        car: u16,
+        car: Car,
         /// The component under test.
         component: ComponentCode,
         /// The event the document belongs to.
-        round: u8,
+        round: Round,
         /// Whether the document states the element is not in conformity.
         stated_not_in_conformity: bool,
         /// Whether the computed count exceeds the allowance.
@@ -90,13 +90,13 @@ pub enum Conflict {
     /// its event. A hard conflict.
     OrdinalMismatch {
         /// The season the components belong to.
-        season: u16,
+        season: Season,
         /// The car number.
-        car: u16,
+        car: Car,
         /// The penalized component.
         component: ComponentCode,
         /// The event the infringement belongs to.
-        round: u8,
+        round: Round,
         /// The ordinal the infringement restates.
         stated_ordinal: u32,
         /// The computed count after the event.
@@ -107,20 +107,20 @@ pub enum Conflict {
     /// is a `(car, component)` pair.
     PenalizedSetMismatch {
         /// The season the event belongs to.
-        season: u16,
+        season: Season,
         /// The event.
-        round: u8,
+        round: Round,
         /// The elements infringements penalize.
-        penalized: BTreeSet<(u16, ComponentCode)>,
+        penalized: BTreeSet<(Car, ComponentCode)>,
         /// The elements the new-elements document flags not in conformity.
-        not_in_conformity: BTreeSet<(u16, ComponentCode)>,
+        not_in_conformity: BTreeSet<(Car, ComponentCode)>,
     },
     /// A fact references a component the season never seeds, so no allowance
     /// exists to check it against (Decision 6: a season's valid components are
     /// exactly its seeded rows).
     UnknownComponent {
         /// The season the fact belongs to.
-        season: u16,
+        season: Season,
         /// The unseeded component.
         component: ComponentCode,
     },
@@ -163,7 +163,7 @@ impl RoundData {
 }
 
 /// The `(season, car, component)` a timeline belongs to.
-type Series = (u16, u16, ComponentCode);
+type Series = (Season, Car, ComponentCode);
 
 /// Cross-check `facts` against `allowances` and return every conflict found.
 ///
@@ -181,8 +181,8 @@ pub fn sweep(facts: &[Fact], allowances: &Allowances) -> Vec<Conflict> {
 }
 
 /// Fold the live facts into per-component, per-event data.
-fn fold_live_facts(facts: &[Fact]) -> BTreeMap<Series, BTreeMap<u8, RoundData>> {
-    let mut timelines: BTreeMap<Series, BTreeMap<u8, RoundData>> = BTreeMap::new();
+fn fold_live_facts(facts: &[Fact]) -> BTreeMap<Series, BTreeMap<Round, RoundData>> {
+    let mut timelines: BTreeMap<Series, BTreeMap<Round, RoundData>> = BTreeMap::new();
     for fact in facts.iter().filter(|fact| !fact.superseded) {
         let series = (fact.season, fact.car, fact.component.clone());
         timelines
@@ -204,11 +204,11 @@ fn fold_live_facts(facts: &[Fact]) -> BTreeMap<Series, BTreeMap<u8, RoundData>> 
 /// `(season, component)` yields one `UnknownComponent`, however many events
 /// reference it.
 fn local_conflicts(
-    timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>,
+    timelines: &BTreeMap<Series, BTreeMap<Round, RoundData>>,
     allowances: &Allowances,
 ) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
-    let mut seen_unknown: BTreeSet<(u16, ComponentCode)> = BTreeSet::new();
+    let mut seen_unknown: BTreeSet<(Season, ComponentCode)> = BTreeSet::new();
 
     let cells = timelines
         .iter()
@@ -282,10 +282,12 @@ fn local_conflicts(
 /// One `windows(2)` over each timeline's present events, already sorted by the
 /// map. A missing round leaves the events it separates adjacent; the sweep
 /// checks the events it holds, not the rounds it lacks.
-fn snapshot_disagreements(timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>) -> Vec<Conflict> {
+fn snapshot_disagreements(
+    timelines: &BTreeMap<Series, BTreeMap<Round, RoundData>>,
+) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
     for ((season, car, component), rounds) in timelines {
-        let ordered: Vec<(&u8, &RoundData)> = rounds.iter().collect();
+        let ordered: Vec<(&Round, &RoundData)> = rounds.iter().collect();
         for pair in ordered.windows(2) {
             let (&from_round, from) = pair[0];
             let (&to_round, to) = pair[1];
@@ -311,14 +313,16 @@ fn snapshot_disagreements(timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>)
 ///
 /// One map groups both sets per `(season, round)`. An event surfaces when its
 /// two sets differ.
-fn penalized_set_conflicts(timelines: &BTreeMap<Series, BTreeMap<u8, RoundData>>) -> Vec<Conflict> {
+fn penalized_set_conflicts(
+    timelines: &BTreeMap<Series, BTreeMap<Round, RoundData>>,
+) -> Vec<Conflict> {
     #[derive(Default)]
     struct EventSets {
-        penalized: BTreeSet<(u16, ComponentCode)>,
-        not_in_conformity: BTreeSet<(u16, ComponentCode)>,
+        penalized: BTreeSet<(Car, ComponentCode)>,
+        not_in_conformity: BTreeSet<(Car, ComponentCode)>,
     }
 
-    let mut events: BTreeMap<(u16, u8), EventSets> = BTreeMap::new();
+    let mut events: BTreeMap<(Season, Round), EventSets> = BTreeMap::new();
     for ((season, car, component), rounds) in timelines {
         for (round, data) in rounds {
             if data.penalized {
@@ -366,25 +370,25 @@ mod tests {
 
     use super::*;
 
-    const SEASON: u16 = 2026;
+    const SEASON: Season = 2026;
 
     fn allowances() -> Allowances {
         Allowances::seed()
     }
 
-    fn fact(round: u8, car: u16, component: &str, claim: Claim) -> Fact {
+    fn fact(round: Round, car: Car, component: &str, claim: Claim) -> Fact {
         Fact::new(SEASON, round, car, component, claim, u32::from(round))
     }
 
-    fn snapshot(round: u8, car: u16, component: &str, count: u32) -> Fact {
+    fn snapshot(round: Round, car: Car, component: &str, count: u32) -> Fact {
         fact(round, car, component, Claim::SnapshotCount(count))
     }
 
-    fn previously_used(round: u8, car: u16, component: &str, count: u32) -> Fact {
+    fn previously_used(round: Round, car: Car, component: &str, count: u32) -> Fact {
         fact(round, car, component, Claim::PreviouslyUsed(count))
     }
 
-    fn fitted(round: u8, car: u16, component: &str, count: u32, conformity: Conformity) -> Fact {
+    fn fitted(round: Round, car: Car, component: &str, count: u32, conformity: Conformity) -> Fact {
         fact(
             round,
             car,
@@ -393,11 +397,11 @@ mod tests {
         )
     }
 
-    fn ordinal(round: u8, car: u16, component: &str, value: u32) -> Fact {
+    fn ordinal(round: Round, car: Car, component: &str, value: u32) -> Fact {
         fact(round, car, component, Claim::StatedOrdinal(value))
     }
 
-    fn penalty(round: u8, car: u16, component: &str) -> Fact {
+    fn penalty(round: Round, car: Car, component: &str) -> Fact {
         fact(
             round,
             car,
@@ -451,8 +455,8 @@ mod tests {
     /// Mutable access to the facts matching one `(round, car, component)`.
     fn matching<'a>(
         facts: &'a mut [Fact],
-        round: u8,
-        car: u16,
+        round: Round,
+        car: Car,
         component: &'a str,
     ) -> impl Iterator<Item = &'a mut Fact> {
         facts.iter_mut().filter(move |fact| {

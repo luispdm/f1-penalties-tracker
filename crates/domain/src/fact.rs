@@ -7,6 +7,15 @@
 
 use std::fmt;
 
+/// A championship season, for example `2026`.
+pub type Season = u16;
+
+/// A car number.
+pub type Car = u16;
+
+/// An event's ordering within a season, counting from one.
+pub type Round = u8;
+
 /// A component code, for example `ICE` or `PU-CE`.
 ///
 /// The code is data, never an enum. The component set changes across seasons:
@@ -104,11 +113,11 @@ pub enum Claim {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fact {
     /// The season the claim belongs to, for example `2026`.
-    pub season: u16,
+    pub season: Season,
     /// The event's ordering within the season, counting from one.
-    pub round: u8,
+    pub round: Round,
     /// The car number the claim is about.
-    pub car: u16,
+    pub car: Car,
     /// The component the claim is about.
     pub component: ComponentCode,
     /// What the fact claims.
@@ -126,9 +135,9 @@ pub struct Fact {
 impl Fact {
     /// Build a live (not superseded) fact.
     pub fn new(
-        season: u16,
-        round: u8,
-        car: u16,
+        season: Season,
+        round: Round,
+        car: Car,
         component: impl Into<ComponentCode>,
         claim: Claim,
         document: u32,
