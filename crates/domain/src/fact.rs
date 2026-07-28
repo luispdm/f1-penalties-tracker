@@ -142,9 +142,11 @@ pub enum Claim {
 
 /// One claim from one document.
 ///
-/// The key is `(season, car)`; there is no cross-season identity, so a team
-/// rename is a non-event. `round` orders events within a season so the sweep can
-/// relate consecutive ones in memory.
+/// Every field records what the source page prints. The seat that owns the
+/// running count is derived from the rosters when the sweep runs and is never
+/// written here, so a fact stays a witness. There is no cross-season identity,
+/// so a team rename is a non-event. `round` orders events within a season so the
+/// sweep can relate consecutive ones in memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fact {
     /// The season the claim belongs to, for example `2026`.
@@ -157,14 +159,25 @@ pub struct Fact {
     pub component: ComponentCode,
     /// What the fact claims.
     pub claim: Claim,
-    /// The source document's number, as its header states it. Reconciliation
-    /// (issue #31) supersedes an original by the highest document number.
+    /// The source document's number, as its header states it. Numbering
+    /// restarts each event, so a document's identity is the number and the
+    /// round: the sweep pairs the two to tell one document's claims from
+    /// another's. Reconciliation (issue #31) supersedes an original by the
+    /// highest document number.
     pub document: u32,
     /// Whether reconciliation has superseded this fact with a corrected
     /// document. The sweep skips superseded facts, so a correction is the
     /// expected outcome and never a conflict. Reconciliation sets this; issue
     /// #24 leaves it `false` and lets tests set it by hand.
     pub superseded: bool,
+    /// The team the source document prints against this car, verbatim.
+    ///
+    /// A witness, not an identity. The sweep checks it against the team the
+    /// roster the document seated on entered the car for, so a page that names
+    /// the wrong team surfaces as a conflict instead of being quietly corrected.
+    /// `None` where the document prints no team, or where the parser reading it
+    /// does not yet take one.
+    pub printed_team: Option<Team>,
 }
 
 impl Fact {
@@ -185,6 +198,14 @@ impl Fact {
             claim,
             document,
             superseded: false,
+            printed_team: None,
         }
+    }
+
+    /// Record the team the source document prints against this car.
+    #[must_use]
+    pub fn with_printed_team(mut self, team: impl Into<Team>) -> Self {
+        self.printed_team = Some(team.into());
+        self
     }
 }
