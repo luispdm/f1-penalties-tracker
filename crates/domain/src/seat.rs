@@ -1,7 +1,7 @@
 //! Seat resolution: which car entry a season's running counts belong to.
 //!
 //! A PU element count belongs to the seat, a team's car entry, not to the driver
-//! in it. Fold a season by seat and a mid-season swap keeps running total;
+//! in it. Fold a season by seat and a mid-season swap keeps one running total;
 //! fold it by car number and the swap mixes two seats, then raises a false
 //! conflict on correct FIA data.
 //!
