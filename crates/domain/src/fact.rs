@@ -159,8 +159,11 @@ pub struct Fact {
     pub component: ComponentCode,
     /// What the fact claims.
     pub claim: Claim,
-    /// The source document's number, as its header states it. Reconciliation
-    /// (issue #31) supersedes an original by the highest document number.
+    /// The source document's number, as its header states it. Numbering
+    /// restarts each event, so a document's identity is the number and the
+    /// round: the sweep pairs the two to tell one document's claims from
+    /// another's. Reconciliation (issue #31) supersedes an original by the
+    /// highest document number.
     pub document: u32,
     /// Whether reconciliation has superseded this fact with a corrected
     /// document. The sweep skips superseded facts, so a correction is the
