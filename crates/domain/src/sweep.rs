@@ -138,13 +138,16 @@ pub enum Conflict {
     },
     /// The rosters seat no car of this number at the event the document
     /// describes, so the fact has no timeline to join. Reported once per
-    /// `(event, car)`: the window may hold no roster for that event, the car may
-    /// not have entered it, or its team's lineage may have stopped.
+    /// `(document event, roster event, car)`: the window may hold no roster for
+    /// the event consulted, the car may not have entered it, or its team's
+    /// lineage may have stopped.
     UnknownSeat {
         /// The season the fact belongs to.
         season: Season,
-        /// The event the document belongs to, not the event it describes.
-        round: Round,
+        /// The event the document belongs to.
+        document_round: Round,
+        /// The event whose roster the sweep consulted.
+        roster_round: Round,
         /// The car number the document prints.
         car: Car,
     },
@@ -156,17 +159,21 @@ pub enum Conflict {
     /// A document names a team the roster it seated on did not enter the car
     /// for. A snapshot is checked against the roster of the previous event, a
     /// new-elements or infringement document against its own. Reported once per
-    /// disagreement, however many components the document's row covers.
+    /// `(document event, roster event, car)`, however many components the
+    /// document's row covers. Two documents at one event that read different
+    /// rosters stay two witnesses.
     PrintedTeamMismatch {
         /// The season the fact belongs to.
         season: Season,
         /// The event the document belongs to.
-        round: Round,
+        document_round: Round,
+        /// The event whose roster the sweep consulted.
+        roster_round: Round,
         /// The car number the document prints.
         car: Car,
         /// The team the document prints.
         printed_team: Team,
-        /// The team the roster entered the car for.
+        /// The team that roster entered the car for.
         roster_team: Team,
     },
 }
@@ -217,9 +224,17 @@ type Timelines<'a> = BTreeMap<Series<'a>, BTreeMap<Round, RoundData>>;
 /// conflict found.
 ///
 /// `seats` comes from [`resolve_seats`](crate::resolve_seats) over the rosters
-/// covering the same events as the facts. Superseded facts are skipped. A clean
-/// set of facts over rosters the resolver could pair returns an empty vector.
-/// The conflicts come back in a deterministic order.
+/// covering the events the facts describe. A snapshot describes the event before
+/// its own, so the window must reach one event back from the earliest snapshot,
+/// unless that snapshot sits at the season's first event. A window that opens
+/// later strands those snapshots: each comes back as
+/// [`UnknownSeat`](Conflict::UnknownSeat) naming the roster event the window
+/// lacks. The sweep never falls back to the nearest earlier roster, which would
+/// silently misseat a car that moved in the gap.
+///
+/// Superseded facts are skipped. A clean set of facts over rosters the resolver
+/// could pair returns an empty vector. The conflicts come back in a
+/// deterministic order.
 #[must_use]
 pub fn sweep(facts: &[Fact], allowances: &Allowances, seats: &Seats) -> Vec<Conflict> {
     let Seated {
@@ -251,7 +266,13 @@ struct Seated<'a> {
 fn seating_round(fact: &Fact) -> Round {
     match fact.claim {
         Claim::SnapshotCount(_) if fact.round > FIRST_ROUND => fact.round - 1,
-        _ => fact.round,
+        // Every variant listed and no wildcard closing the match, so a new claim
+        // kind must state which event it describes before this compiles.
+        Claim::SnapshotCount(_)
+        | Claim::ElementsFitted { .. }
+        | Claim::PreviouslyUsed(_)
+        | Claim::StatedOrdinal(_)
+        | Claim::Penalty(_) => fact.round,
     }
 }
 
@@ -260,18 +281,24 @@ fn seating_round(fact: &Fact) -> Round {
 ///
 /// A fact that cannot be seated joins no timeline, so leaving it unreported
 /// would drop it from every equation and pass silently.
+///
+/// Both dedupe keys carry the roster event alongside the document's own, so a
+/// snapshot and a new-elements document at one event stay separate.
 fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
     let mut timelines = Timelines::new();
     let mut conflicts = Vec::new();
-    let mut unseated: BTreeSet<(Season, Round, Car)> = BTreeSet::new();
-    let mut misprinted: BTreeSet<(Season, Round, Car, &Team, &Team)> = BTreeSet::new();
+    let mut unseated: BTreeSet<(Season, Round, Round, Car)> = BTreeSet::new();
+    let mut misprinted: BTreeSet<(Season, Round, Round, Car, &Team, &Team)> = BTreeSet::new();
 
     for fact in facts.iter().filter(|fact| !fact.superseded) {
-        let Some(seat) = seats.seat(fact.season, seating_round(fact), fact.car) else {
-            if unseated.insert((fact.season, fact.round, fact.car)) {
+        let roster_round = seating_round(fact);
+
+        let Some(seat) = seats.seat(fact.season, roster_round, fact.car) else {
+            if unseated.insert((fact.season, fact.round, roster_round, fact.car)) {
                 conflicts.push(Conflict::UnknownSeat {
                     season: fact.season,
-                    round: fact.round,
+                    document_round: fact.round,
+                    roster_round,
                     car: fact.car,
                 });
             }
@@ -280,11 +307,19 @@ fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
 
         if let Some(printed) = fact.printed_team.as_ref()
             && printed != &seat.team
-            && misprinted.insert((fact.season, fact.round, fact.car, printed, &seat.team))
+            && misprinted.insert((
+                fact.season,
+                fact.round,
+                roster_round,
+                fact.car,
+                printed,
+                &seat.team,
+            ))
         {
             conflicts.push(Conflict::PrintedTeamMismatch {
                 season: fact.season,
-                round: fact.round,
+                document_round: fact.round,
+                roster_round,
                 car: fact.car,
                 printed_team: printed.clone(),
                 roster_team: seat.team.clone(),
@@ -561,8 +596,10 @@ mod tests {
     }
 
     /// The same four events with the opening grid throughout: rosters that never
-    /// record the moves. Every car then holds one seat all season, so the sweep
-    /// folds by car number and the seat key buys nothing.
+    /// record the moves. Each of the six cars on that grid then holds one seat
+    /// all season, so for them the sweep folds by car number and the seat key
+    /// buys nothing. Car 43 enters no roster here: the substitute's facts drop
+    /// out unseated.
     fn unchanged_seats() -> Seats {
         resolve_seats(&[
             roster(1, opening_grid()),
@@ -692,27 +729,33 @@ mod tests {
     fn rosters_that_miss_the_swap_raise_a_false_previously_used_mismatch() {
         let conflicts = sweep(&clean_facts(), &allowances(), &unchanged_seats());
 
-        assert!(conflicts.contains(&Conflict::PreviouslyUsedMismatch {
-            seat: seat(RACING_BULLS, 1),
-            component: ComponentCode::new(ICE),
-            round: 3,
-            previously_used: 2,
-            snapshot: 1,
-        }));
+        assert!(
+            conflicts.contains(&Conflict::PreviouslyUsedMismatch {
+                seat: seat(RACING_BULLS, 1),
+                component: ComponentCode::new(ICE),
+                round: 3,
+                previously_used: 2,
+                snapshot: 1,
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
     fn rosters_that_miss_the_swap_raise_a_false_snapshot_disagreement() {
         let conflicts = sweep(&clean_facts(), &allowances(), &unchanged_seats());
 
-        assert!(conflicts.contains(&Conflict::SnapshotDisagreement {
-            seat: seat(RACING_BULLS, 1),
-            component: ComponentCode::new(ICE),
-            from_round: 3,
-            to_round: 4,
-            count_after: 2,
-            next_snapshot: 3,
-        }));
+        assert!(
+            conflicts.contains(&Conflict::SnapshotDisagreement {
+                seat: seat(RACING_BULLS, 1),
+                component: ComponentCode::new(ICE),
+                from_round: 3,
+                to_round: 4,
+                count_after: 2,
+                next_snapshot: 3,
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
@@ -728,13 +771,16 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::PreviouslyUsedMismatch {
-            seat: seat(FERRARI, 1),
-            component: ComponentCode::new(ICE),
-            round: 3,
-            previously_used: 0,
-            snapshot: 2,
-        }));
+        assert!(
+            conflicts.contains(&Conflict::PreviouslyUsedMismatch {
+                seat: seat(FERRARI, 1),
+                component: ComponentCode::new(ICE),
+                round: 3,
+                previously_used: 0,
+                snapshot: 2,
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
@@ -748,14 +794,17 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::SnapshotDisagreement {
-            seat: seat(FERRARI, 1),
-            component: ComponentCode::new(ICE),
-            from_round: 3,
-            to_round: 4,
-            count_after: 4,
-            next_snapshot: 3,
-        }));
+        assert!(
+            conflicts.contains(&Conflict::SnapshotDisagreement {
+                seat: seat(FERRARI, 1),
+                component: ComponentCode::new(ICE),
+                from_round: 3,
+                to_round: 4,
+                count_after: 4,
+                next_snapshot: 3,
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
@@ -779,13 +828,17 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::PrintedTeamMismatch {
-            season: SEASON,
-            round: 3,
-            car: 22,
-            printed_team: RED_BULL.into(),
-            roster_team: RACING_BULLS.into(),
-        }));
+        assert!(
+            conflicts.contains(&Conflict::PrintedTeamMismatch {
+                season: SEASON,
+                document_round: 3,
+                roster_round: 2,
+                car: 22,
+                printed_team: RED_BULL.into(),
+                roster_team: RACING_BULLS.into(),
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
@@ -801,13 +854,56 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::PrintedTeamMismatch {
-            season: SEASON,
-            round: 3,
-            car: 22,
-            printed_team: RACING_BULLS.into(),
-            roster_team: RED_BULL.into(),
-        }));
+        assert!(
+            conflicts.contains(&Conflict::PrintedTeamMismatch {
+                season: SEASON,
+                document_round: 3,
+                roster_round: 3,
+                car: 22,
+                printed_team: RACING_BULLS.into(),
+                roster_team: RED_BULL.into(),
+            }),
+            "{conflicts:?}"
+        );
+    }
+
+    #[test]
+    fn two_documents_at_one_event_reading_different_rosters_are_two_conflicts() {
+        let mut facts = clean_facts();
+        // Car 30 is a Red Bull entry at rounds 1 and 2, so round 2's snapshot and
+        // its new-elements document read different rosters that agree on the
+        // team. Both misprint it, and each stays its own witness.
+        for fact in matching(&mut facts, 2, 30) {
+            fact.printed_team = Some(FERRARI.into());
+        }
+
+        let conflicts = sweep(&facts, &allowances(), &seats());
+        let misprints: Vec<&Conflict> = conflicts
+            .iter()
+            .filter(|conflict| matches!(conflict, Conflict::PrintedTeamMismatch { .. }))
+            .collect();
+
+        assert_eq!(
+            misprints,
+            vec![
+                &Conflict::PrintedTeamMismatch {
+                    season: SEASON,
+                    document_round: 2,
+                    roster_round: 1,
+                    car: 30,
+                    printed_team: FERRARI.into(),
+                    roster_team: RED_BULL.into(),
+                },
+                &Conflict::PrintedTeamMismatch {
+                    season: SEASON,
+                    document_round: 2,
+                    roster_round: 2,
+                    car: 30,
+                    printed_team: FERRARI.into(),
+                    roster_team: RED_BULL.into(),
+                },
+            ]
+        );
     }
 
     #[test]
@@ -848,8 +944,28 @@ mod tests {
             conflicts,
             vec![Conflict::UnknownSeat {
                 season: SEASON,
-                round: 1,
+                document_round: 1,
+                roster_round: 1,
                 car: 77,
+            }]
+        );
+    }
+
+    #[test]
+    fn a_window_opening_at_a_snapshots_own_event_strands_it() {
+        // Rounds 3 and 4 only: the round 3 snapshot describes round 2, whose
+        // roster the window does not hold.
+        let short = resolve_seats(&[roster(3, swapped_grid()), roster(4, swapped_grid())]);
+
+        let conflicts = sweep(&[snapshot(3, 22, RACING_BULLS, 1)], &allowances(), &short);
+
+        assert_eq!(
+            conflicts,
+            vec![Conflict::UnknownSeat {
+                season: SEASON,
+                document_round: 3,
+                roster_round: 2,
+                car: 22,
             }]
         );
     }
@@ -938,13 +1054,16 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::StatedExceedanceMismatch {
-            seat: seat(RED_BULL, 1),
-            component: ComponentCode::new(ICE),
-            round: 3,
-            stated_not_in_conformity: true,
-            computed_exceeds: false,
-        }));
+        assert!(
+            conflicts.contains(&Conflict::StatedExceedanceMismatch {
+                seat: seat(RED_BULL, 1),
+                component: ComponentCode::new(ICE),
+                round: 3,
+                stated_not_in_conformity: true,
+                computed_exceeds: false,
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
@@ -960,12 +1079,15 @@ mod tests {
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
-        assert!(conflicts.contains(&Conflict::PenalizedSetMismatch {
-            season: SEASON,
-            round: 3,
-            penalized: BTreeSet::from([(seat(FERRARI, 0), ComponentCode::new(ICE))]),
-            not_in_conformity: BTreeSet::new(),
-        }));
+        assert!(
+            conflicts.contains(&Conflict::PenalizedSetMismatch {
+                season: SEASON,
+                round: 3,
+                penalized: BTreeSet::from([(seat(FERRARI, 0), ComponentCode::new(ICE))]),
+                not_in_conformity: BTreeSet::new(),
+            }),
+            "{conflicts:?}"
+        );
     }
 
     #[test]
