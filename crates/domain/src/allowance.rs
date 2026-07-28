@@ -1,6 +1,6 @@
 //! Per-season component allowances and the one rule the domain implements.
 //!
-//! Allowances are seeded from the regulations, never parsed from document text
+//! Allowances are seeded from the regulations, never parsed from document text.
 //! A parser leaves holes until someone fits that part: the 2025
 //! Belgian document omits the exhaust because nobody took one at Spa, so reading
 //! the set from a document would record it short. The seed is complete from the
