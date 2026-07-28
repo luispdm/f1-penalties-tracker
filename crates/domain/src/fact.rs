@@ -26,11 +26,6 @@ pub type Round = u8;
 pub struct Team(String);
 
 impl Team {
-    /// Wrap a raw team name.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
-    }
-
     /// The name as a string slice.
     #[must_use]
     pub fn as_str(&self) -> &str {

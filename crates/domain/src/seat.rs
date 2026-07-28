@@ -13,9 +13,11 @@
 //!
 //! [`resolve_seats`] diffs each team between consecutive events. One car out and
 //! one car in transfers the seat, which covers a mid-season swap and an
-//! outside-grid substitute alike, with no special path. A diff that
-//! admits more than one pairing of arriving cars to vacated seats becomes a
-//! [`SeatAmbiguity`] and stops that team's lineage; a human supplies the mapping.
+//! outside-grid substitute alike, with no special path. A car the team has
+//! seated before is matched on the slot it last held, never paired by count into
+//! another car's seat. A diff that admits more than one pairing of arriving cars
+//! to vacated seats becomes a [`SeatAmbiguity`] and stops that team's lineage; a
+//! human supplies the mapping.
 //!
 //! The seat is computed here and never written onto a fact. It
 //! groups within one season.
@@ -75,8 +77,10 @@ pub struct Roster {
 
 /// A per-team diff the resolver could not pair without guessing.
 ///
-/// Both of a team's occupants changing at once is the case that matters: the
-/// diff cannot tell which arriving car took which vacated seat. The resolver
+/// Two diffs reach here. Both of a team's occupants change at once, so the diff
+/// cannot tell which arriving car took which vacated seat; or a car returns to a
+/// slot another car entered at this event now occupies, so the diff cannot tell
+/// whether it resumes that slot or takes the vacant one. Either way the resolver
 /// flags the event and seats none of the team's cars from it onward, leaving the
 /// mapping to a human.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -169,13 +173,10 @@ fn resolve_season(season: Season, events: &BTreeMap<Round, Entries>, seats: &mut
     for (&round, entries) in events {
         for (team, entered) in group_by_team(entries) {
             let lineage = lineages.entry(team.clone()).or_default();
-            if lineage.stopped {
-                continue;
-            }
 
             match lineage.carry(&entered) {
-                Ok(()) => {
-                    for (slot, car) in lineage.seated(&entered) {
+                Ok(seated) => {
+                    for (slot, car) in seated {
                         let seat = Seat {
                             season,
                             team: team.clone(),
@@ -205,23 +206,32 @@ struct Unpaired {
 /// One team's seat lineage as a season's events carry it forward.
 #[derive(Default)]
 struct Lineage {
-    /// The last car known to occupy each of the team's slots. A slot keeps its
-    /// occupant while that car sits out, so a regular driver returning from a
-    /// one-event substitution needs no second transfer.
+    /// The car occupying each of the team's slots. A slot keeps its occupant
+    /// while that car sits out unreplaced, so a team entering one car for an
+    /// event gives up no seat and needs no transfer to get it back.
     occupants: BTreeMap<Slot, Car>,
+    /// The slot each car last held for this team, kept after the car leaves it.
+    /// A returning car is recognised by that slot instead of paired by count.
+    held: BTreeMap<Car, Slot>,
     /// Set by the first diff the lineage could not pair. The team resolves no
     /// further event.
     stopped: bool,
 }
 
 impl Lineage {
-    /// Carry the lineage into an event whose entered cars are `entered`.
+    /// Carry the lineage into an event whose entered cars are `entered`, and
+    /// return the cars it seats there with their slots.
     ///
     /// Cars already occupying a slot keep it. The rest pair against the slots
     /// this event vacates: no vacancy seats every arrival afresh, one vacancy
     /// and one arrival transfers the seat, and anything else is unpairable, so
-    /// the lineage stops rather than choose.
-    fn carry(&mut self, entered: &BTreeSet<Car>) -> Result<(), Unpaired> {
+    /// the lineage stops rather than choose. A stopped lineage seats nothing and
+    /// returns no second error.
+    fn carry(&mut self, entered: &BTreeSet<Car>) -> Result<Vec<(Slot, Car)>, Unpaired> {
+        if self.stopped {
+            return Ok(Vec::new());
+        }
+
         let occupied: BTreeSet<Car> = self.occupants.values().copied().collect();
         let vacated: Vec<Slot> = self
             .occupants
@@ -235,6 +245,11 @@ impl Lineage {
             .filter(|car| !occupied.contains(car))
             .collect();
 
+        if self.contested(entered, &arriving) {
+            self.stopped = true;
+            return Err(Unpaired { vacated, arriving });
+        }
+
         match (vacated.len(), arriving.len()) {
             (_, 0) => {}
             (0, _) => {
@@ -242,15 +257,34 @@ impl Lineage {
                     self.seat_in_new_slot(car);
                 }
             }
-            (1, 1) => self
-                .occupants
-                .extend(vacated.iter().copied().zip(arriving.iter().copied())),
+            (1, 1) => {
+                for (slot, car) in vacated.iter().copied().zip(arriving.iter().copied()) {
+                    self.seat_in(slot, car);
+                }
+            }
             _ => {
                 self.stopped = true;
                 return Err(Unpaired { vacated, arriving });
             }
         }
-        Ok(())
+        Ok(self.seated(entered))
+    }
+
+    /// Whether an arriving car returns to a slot a car entered at this event now
+    /// occupies.
+    ///
+    /// Neither reading follows from the counts: the car may resume the slot it
+    /// last held, or take the one this event vacates. Where its old slot is
+    /// free, the ordinary pairing still holds, so a regular coming back from a
+    /// substitution stays resolvable.
+    fn contested(&self, entered: &BTreeSet<Car>, arriving: &[Car]) -> bool {
+        arriving.iter().any(|car| {
+            self.held.get(car).is_some_and(|slot| {
+                self.occupants
+                    .get(slot)
+                    .is_some_and(|sitting| entered.contains(sitting))
+            })
+        })
     }
 
     /// Seat `car` in the lowest slot the team has never used.
@@ -261,24 +295,34 @@ impl Lineage {
     fn seat_in_new_slot(&mut self, car: Car) {
         if let Some(slot) = (Slot::MIN..=Slot::MAX).find(|slot| !self.occupants.contains_key(slot))
         {
-            self.occupants.insert(slot, car);
+            self.seat_in(slot, car);
         }
     }
 
+    /// Seat `car` in `slot` and record the slot as the one that car last held.
+    ///
+    /// Every seating goes through here, so a car that leaves the team is still
+    /// recognised when it comes back.
+    fn seat_in(&mut self, slot: Slot, car: Car) {
+        self.occupants.insert(slot, car);
+        self.held.insert(car, slot);
+    }
+
     /// The cars the lineage seats at this event, with their slots.
-    fn seated<'a>(&'a self, entered: &'a BTreeSet<Car>) -> impl Iterator<Item = (Slot, Car)> + 'a {
+    fn seated(&self, entered: &BTreeSet<Car>) -> Vec<(Slot, Car)> {
         self.occupants
             .iter()
             .filter(|(_, car)| entered.contains(*car))
             .map(|(&slot, &car)| (slot, car))
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     //! Hand-built rosters drive the resolver. A swap and a substitution each
-    //! transfer one seat; both occupants changing at once is flagged and never
-    //! guessed.
+    //! transfer one seat; both occupants changing at once, and a car returning
+    //! to a slot an entered car holds, are flagged and never guessed.
 
     use super::*;
 
@@ -367,6 +411,84 @@ mod tests {
         ]
     }
 
+    /// Ferrari's second slot goes to substitute car 43 at round 2, and car 44
+    /// takes it back at round 3.
+    fn substitution_and_return() -> Vec<Roster> {
+        vec![
+            roster(
+                1,
+                vec![
+                    entry(16, "Leclerc", FERRARI),
+                    entry(44, "Hamilton", FERRARI),
+                ],
+            ),
+            roster(
+                2,
+                vec![
+                    entry(16, "Leclerc", FERRARI),
+                    entry(43, "Colapinto", FERRARI),
+                ],
+            ),
+            roster(
+                3,
+                vec![
+                    entry(16, "Leclerc", FERRARI),
+                    entry(44, "Hamilton", FERRARI),
+                ],
+            ),
+        ]
+    }
+
+    /// The same substitution, but car 16 sits out at round 3, so cars 43 and 44
+    /// both enter with one slot vacant: car 44 could resume the slot it held or
+    /// take the one car 16 leaves.
+    fn contested_return() -> Vec<Roster> {
+        vec![
+            roster(
+                1,
+                vec![
+                    entry(16, "Leclerc", FERRARI),
+                    entry(44, "Hamilton", FERRARI),
+                ],
+            ),
+            roster(
+                2,
+                vec![
+                    entry(16, "Leclerc", FERRARI),
+                    entry(43, "Colapinto", FERRARI),
+                ],
+            ),
+            roster(
+                3,
+                vec![
+                    entry(43, "Colapinto", FERRARI),
+                    entry(44, "Hamilton", FERRARI),
+                ],
+            ),
+        ]
+    }
+
+    /// Red Bull enters car 1 alone at round 2, with nobody in car 30's slot.
+    fn one_car_entry() -> Vec<Roster> {
+        vec![
+            roster(
+                1,
+                vec![
+                    entry(1, "Verstappen", RED_BULL),
+                    entry(30, "Lawson", RED_BULL),
+                ],
+            ),
+            roster(2, vec![entry(1, "Verstappen", RED_BULL)]),
+            roster(
+                3,
+                vec![
+                    entry(1, "Verstappen", RED_BULL),
+                    entry(30, "Lawson", RED_BULL),
+                ],
+            ),
+        ]
+    }
+
     #[test]
     fn a_teams_first_event_seats_its_lowest_car_number_in_the_first_slot() {
         assert_eq!(
@@ -434,31 +556,42 @@ mod tests {
 
     #[test]
     fn a_regular_returning_from_a_substitution_returns_to_its_seat() {
-        let seats = resolve_seats(&[
-            roster(
-                1,
-                vec![
-                    entry(16, "Leclerc", FERRARI),
-                    entry(44, "Hamilton", FERRARI),
-                ],
-            ),
-            roster(
-                2,
-                vec![
-                    entry(16, "Leclerc", FERRARI),
-                    entry(43, "Colapinto", FERRARI),
-                ],
-            ),
-            roster(
-                3,
-                vec![
-                    entry(16, "Leclerc", FERRARI),
-                    entry(44, "Hamilton", FERRARI),
-                ],
-            ),
-        ]);
+        assert_eq!(
+            resolve_seats(&substitution_and_return()).seat(SEASON, 3, 44),
+            Some(&seat(FERRARI, 1))
+        );
+    }
 
-        assert_eq!(seats.seat(SEASON, 3, 44), Some(&seat(FERRARI, 1)));
+    #[test]
+    fn a_regular_returning_from_a_substitution_flags_nothing() {
+        assert_eq!(resolve_seats(&substitution_and_return()).ambiguities(), &[]);
+    }
+
+    #[test]
+    fn a_slot_keeps_its_occupant_while_its_car_sits_out_unreplaced() {
+        assert_eq!(
+            resolve_seats(&one_car_entry()).seat(SEASON, 3, 30),
+            Some(&seat(RED_BULL, 1))
+        );
+    }
+
+    #[test]
+    fn a_car_returning_to_a_slot_an_entered_car_holds_is_flagged() {
+        assert_eq!(
+            resolve_seats(&contested_return()).ambiguities(),
+            &[SeatAmbiguity {
+                season: SEASON,
+                round: 3,
+                team: FERRARI.into(),
+                vacated: vec![0],
+                arriving: vec![44],
+            }]
+        );
+    }
+
+    #[test]
+    fn a_car_returning_to_a_slot_an_entered_car_holds_takes_no_seat() {
+        assert_eq!(resolve_seats(&contested_return()).seat(SEASON, 3, 44), None);
     }
 
     #[test]
