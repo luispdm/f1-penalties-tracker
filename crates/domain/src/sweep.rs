@@ -266,8 +266,6 @@ struct Seated<'a> {
 fn seating_round(fact: &Fact) -> Round {
     match fact.claim {
         Claim::SnapshotCount(_) if fact.round > FIRST_ROUND => fact.round - 1,
-        // Every variant listed and no wildcard closing the match, so a new claim
-        // kind must state which event it describes before this compiles.
         Claim::SnapshotCount(_)
         | Claim::ElementsFitted { .. }
         | Claim::PreviouslyUsed(_)
