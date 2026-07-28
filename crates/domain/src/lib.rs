@@ -4,7 +4,7 @@
 //! later, by the document parsers. It carries three things:
 //!
 //! - [`Fact`] and its [`Claim`] kinds, the verbatim record of what one document
-//!   states about one component (Decision 4: store raw facts, compute the view).
+//!   states about one component (store raw facts, compute the view).
 //! - [`Allowances`], the per-season regulation allowances and the single rule
 //!   the domain implements, that a count above its allowance is an exceedance.
 //! - [`sweep`], the invariant oracle that cross-checks the facts against each

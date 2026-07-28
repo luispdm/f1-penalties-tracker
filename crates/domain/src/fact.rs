@@ -2,7 +2,7 @@
 //!
 //! Three independent FIA documents state the same running count, so the tracker
 //! records each claim verbatim, tagged by its source, and lets the invariant
-//! sweep cross-check them (Decision 4: store raw facts, compute the view, flag
+//! sweep cross-check them (store raw facts, compute the view, flag
 //! disagreements, never guess). Nothing here computes; a fact is a witness.
 
 use std::fmt;
@@ -18,7 +18,7 @@ pub type Round = u8;
 
 /// A team name, for example `Ferrari`.
 ///
-/// An observed string, scoped to its season (Decision 7). There is no
+/// An observed string, scoped to its season. There is no
 /// cross-season team identity, so the Sauber, Alfa Romeo, and Audi renames are
 /// non-events and no mapping table exists to keep current. Within a season the
 /// name is part of the seat's identity, so it is compared, never normalised.

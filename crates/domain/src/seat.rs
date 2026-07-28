@@ -1,11 +1,11 @@
 //! Seat resolution: which car entry a season's running counts belong to.
 //!
 //! A PU element count belongs to the seat, a team's car entry, not to the driver
-//! in it (Decision 18). Fold a season by seat and a mid-season swap keeps one
-//! running total; fold it by car number and the swap mixes two seats, then raises
-//! a false conflict on correct FIA data.
+//! in it. Fold a season by seat and a mid-season swap keeps running total;
+//! fold it by car number and the swap mixes two seats, then raises a false
+//! conflict on correct FIA data.
 //!
-//! A [`Seat`] is `(season, team, slot)` (Decision 19). One rule produces the
+//! A [`Seat`] is `(season, team, slot)`. One rule produces the
 //! slot at every event: a car entering a team with no vacated seat to inherit
 //! takes a fresh slot, and arrivals are seated in ascending car-number order. A
 //! team's first event vacates nothing, so its cars number by car number; every
@@ -13,13 +13,12 @@
 //!
 //! [`resolve_seats`] diffs each team between consecutive events. One car out and
 //! one car in transfers the seat, which covers a mid-season swap and an
-//! outside-grid substitute alike, with no special path (Decision 24). A diff that
+//! outside-grid substitute alike, with no special path. A diff that
 //! admits more than one pairing of arriving cars to vacated seats becomes a
-//! [`SeatAmbiguity`] and stops that team's lineage; a human supplies the mapping
-//! (Decision 23: never guess).
+//! [`SeatAmbiguity`] and stops that team's lineage; a human supplies the mapping.
 //!
-//! The seat is computed here and never written onto a fact (Decision 20). It
-//! groups within one season, so Decision 7 still holds.
+//! The seat is computed here and never written onto a fact. It
+//! groups within one season.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -37,7 +36,7 @@ pub type Slot = u8;
 /// A team's car entry within one season: the identity a running count follows.
 ///
 /// The car number and the printed driver stay recorded for display; neither is
-/// the identity (Decision 19).
+/// the identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Seat {
     /// The season the seat belongs to.
@@ -61,7 +60,7 @@ pub struct RosterEntry {
 
 /// The entered race drivers for one event.
 ///
-/// Entered race drivers only (Decision 22): an FP1-only cameo never shifts a
+/// Entered race drivers only: an FP1-only cameo never shifts a
 /// seat. One entry per car; a car repeated within an event keeps its first
 /// entry, so a car never sits in two teams at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,7 +78,7 @@ pub struct Roster {
 /// Both of a team's occupants changing at once is the case that matters: the
 /// diff cannot tell which arriving car took which vacated seat. The resolver
 /// flags the event and seats none of the team's cars from it onward, leaving the
-/// mapping to a human (Decision 23).
+/// mapping to a human.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeatAmbiguity {
     /// The season the event belongs to.
@@ -122,7 +121,7 @@ impl Seats {
 
 /// Resolve the seat of every car entry in a window of rosters.
 ///
-/// Seasons resolve independently (Decision 3), and the window is order
+/// Seasons resolve independently, and the window is order
 /// independent: the rosters are indexed by season and round before any diff
 /// runs.
 #[must_use]
