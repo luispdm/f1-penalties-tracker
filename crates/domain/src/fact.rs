@@ -16,6 +16,46 @@ pub type Car = u16;
 /// An event's ordering within a season, counting from one.
 pub type Round = u8;
 
+/// A team name, for example `Ferrari`.
+///
+/// An observed string, scoped to its season (Decision 7). There is no
+/// cross-season team identity, so the Sauber, Alfa Romeo, and Audi renames are
+/// non-events and no mapping table exists to keep current. Within a season the
+/// name is part of the seat's identity, so it is compared, never normalised.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Team(String);
+
+impl Team {
+    /// Wrap a raw team name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self(name.into())
+    }
+
+    /// The name as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Team {
+    fn from(name: &str) -> Self {
+        Self(name.to_owned())
+    }
+}
+
+impl From<String> for Team {
+    fn from(name: String) -> Self {
+        Self(name)
+    }
+}
+
+impl fmt::Display for Team {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// A component code, for example `ICE` or `PU-CE`.
 ///
 /// The code is data, never an enum. The component set changes across seasons:
