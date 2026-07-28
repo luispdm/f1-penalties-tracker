@@ -1003,6 +1003,36 @@ mod tests {
     }
 
     #[test]
+    fn one_document_number_at_two_events_misprinting_a_team_is_two_conflicts() {
+        // Numbers restart each event, so both snapshots print number 1. Round
+        // 2's snapshot describes round 1, so both read roster 1, and both
+        // misprint car 30's team. Only the round tells the two documents apart.
+        let facts = vec![snapshot(1, 30, FERRARI, 0), snapshot(2, 30, FERRARI, 0)];
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![
+                Conflict::PrintedTeamMismatch {
+                    season: SEASON,
+                    document_round: 1,
+                    roster_round: 1,
+                    car: 30,
+                    printed_team: FERRARI.into(),
+                    roster_team: RED_BULL.into(),
+                },
+                Conflict::PrintedTeamMismatch {
+                    season: SEASON,
+                    document_round: 2,
+                    roster_round: 1,
+                    car: 30,
+                    printed_team: FERRARI.into(),
+                    roster_team: RED_BULL.into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn one_documents_component_rows_are_one_conflict() {
         // One new-elements document lists car 30 once per component and
         // misprints the team on both rows.
@@ -1108,6 +1138,32 @@ mod tests {
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
             vec![unseated.clone(), unseated]
+        );
+    }
+
+    #[test]
+    fn one_document_number_at_two_events_naming_an_unseated_car_is_two_conflicts() {
+        // Numbers restart each event, so both snapshots print number 1. Round
+        // 2's snapshot describes round 1, so both read roster 1, and neither can
+        // seat car 77. Only the round tells the two documents apart.
+        let facts = vec![snapshot(1, 77, "Alpine", 0), snapshot(2, 77, "Alpine", 0)];
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![
+                Conflict::UnknownSeat {
+                    season: SEASON,
+                    document_round: 1,
+                    roster_round: 1,
+                    car: 77,
+                },
+                Conflict::UnknownSeat {
+                    season: SEASON,
+                    document_round: 2,
+                    roster_round: 1,
+                    car: 77,
+                },
+            ]
         );
     }
 
