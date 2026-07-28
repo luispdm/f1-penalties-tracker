@@ -4,8 +4,7 @@
 //! publishes before an event, the new-elements document lands after it, and an
 //! infringement restates the count of the element it penalizes. The sweep folds
 //! the facts into per-component timelines and proves the oracle equations over
-//! them, flagging every disagreement rather than guessing which witness is right
-//! (Decision 4).
+//! them, flagging every disagreement rather than guessing which witness is right.
 //!
 //! It runs over surviving facts only. A fact a corrected document has superseded
 //! is skipped, so a correction is the expected outcome and never a conflict.
@@ -116,7 +115,7 @@ pub enum Conflict {
         not_in_conformity: BTreeSet<(Car, ComponentCode)>,
     },
     /// A fact references a component the season never seeds, so no allowance
-    /// exists to check it against (Decision 6: a season's valid components are
+    /// exists to check it against (a season's valid components are
     /// exactly its seeded rows).
     UnknownComponent {
         /// The season the fact belongs to.

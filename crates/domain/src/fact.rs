@@ -2,7 +2,7 @@
 //!
 //! Three independent FIA documents state the same running count, so the tracker
 //! records each claim verbatim, tagged by its source, and lets the invariant
-//! sweep cross-check them (Decision 4: store raw facts, compute the view, flag
+//! sweep cross-check them (store raw facts, compute the view, flag
 //! disagreements, never guess). Nothing here computes; a fact is a witness.
 
 use std::fmt;
@@ -15,6 +15,41 @@ pub type Car = u16;
 
 /// An event's ordering within a season, counting from one.
 pub type Round = u8;
+
+/// A team name, for example `Ferrari`.
+///
+/// An observed string, scoped to its season. There is no
+/// cross-season team identity, so the Sauber, Alfa Romeo, and Audi renames are
+/// non-events and no mapping table exists to keep current. Within a season the
+/// name is part of the seat's identity, so it is compared, never normalised.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Team(String);
+
+impl Team {
+    /// The name as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for Team {
+    fn from(name: &str) -> Self {
+        Self(name.to_owned())
+    }
+}
+
+impl From<String> for Team {
+    fn from(name: String) -> Self {
+        Self(name)
+    }
+}
+
+impl fmt::Display for Team {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
 
 /// A component code, for example `ICE` or `PU-CE`.
 ///
