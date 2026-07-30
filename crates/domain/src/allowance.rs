@@ -1,4 +1,4 @@
-//! Per-season component allowances and the one rule the domain implements.
+//! Component allowances and the one rule the domain implements.
 //!
 //! Allowances are seeded from the regulations, never parsed from document text.
 //! A parser leaves holes until someone fits that part: the 2025
@@ -12,65 +12,59 @@
 
 use std::collections::BTreeMap;
 
-use crate::fact::{ComponentCode, Season};
+use crate::fact::ComponentCode;
 
-/// The seeded allowance table: a season and component code map to a permitted
+/// One season's seeded allowance table: a component code maps to a permitted
 /// count.
 ///
-/// A season's valid components are exactly the rows present for it, so a lookup
-/// that misses tells the sweep the component is unknown for that season rather
-/// than assuming a default.
+/// The season's valid components are exactly the rows present, so a lookup that
+/// misses tells the sweep the component is unknown rather than assuming a
+/// default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Allowances {
-    by_season: BTreeMap<Season, BTreeMap<ComponentCode, u32>>,
+    by_component: BTreeMap<ComponentCode, u32>,
 }
 
 impl Allowances {
-    /// Build an allowance table from `(season, component, allowance)` rows.
-    pub fn from_rows(rows: impl IntoIterator<Item = (Season, ComponentCode, u32)>) -> Self {
-        let mut by_season: BTreeMap<Season, BTreeMap<ComponentCode, u32>> = BTreeMap::new();
-        for (season, component, allowance) in rows {
-            by_season
-                .entry(season)
-                .or_default()
-                .insert(component, allowance);
+    /// Build an allowance table from `(component, allowance)` rows.
+    pub fn from_rows(rows: impl IntoIterator<Item = (ComponentCode, u32)>) -> Self {
+        Self {
+            by_component: rows.into_iter().collect(),
         }
-        Self { by_season }
     }
 
-    /// The permitted count for a component in a season, or `None` when the
-    /// component is not seeded for that season.
+    /// The permitted count for a component, or `None` when the component is not
+    /// seeded.
     #[must_use]
-    pub fn allowance(&self, season: Season, component: &ComponentCode) -> Option<u32> {
-        self.by_season.get(&season)?.get(component).copied()
+    pub fn allowance(&self, component: &ComponentCode) -> Option<u32> {
+        self.by_component.get(component).copied()
     }
 
     /// Whether `count` exceeds the allowance: the single domain rule.
     ///
     /// Returns `Some(true)` above the allowance and `Some(false)` at or below
-    /// it. Returns `None` when the component is not seeded for the season, so a
-    /// caller cannot mistake an unknown component for a compliant one.
+    /// it. Returns `None` when the component is not seeded, so a caller cannot
+    /// mistake an unknown component for a compliant one.
     #[must_use]
-    pub fn exceeds(&self, season: Season, component: &ComponentCode, count: u32) -> Option<bool> {
-        self.allowance(season, component)
-            .map(|allowance| count > allowance)
+    pub fn exceeds(&self, component: &ComponentCode, count: u32) -> Option<bool> {
+        self.allowance(component).map(|allowance| count > allowance)
     }
 
-    /// The regulation allowances for the seasons the tracker currently covers.
+    /// The 2026 regulation allowances, the season the synthetic events exercise.
     ///
-    /// 2026 only, the season the synthetic events exercise. The verified set is
-    /// seven components: ICE, TC, EXH, MGU-K, ES, PU-CE, PU-ANC. Later seasons
-    /// seed their own rows, which differ, so the table stays data.
+    /// The verified set is seven components: ICE, TC, EXH, MGU-K, ES, PU-CE,
+    /// PU-ANC. Later seasons seed their own rows, which differ, so the table
+    /// stays data.
     #[must_use]
     pub fn seed() -> Self {
         Self::from_rows([
-            (2026, ComponentCode::new("ICE"), 4),
-            (2026, ComponentCode::new("TC"), 4),
-            (2026, ComponentCode::new("EXH"), 4),
-            (2026, ComponentCode::new("MGU-K"), 3),
-            (2026, ComponentCode::new("ES"), 3),
-            (2026, ComponentCode::new("PU-CE"), 3),
-            (2026, ComponentCode::new("PU-ANC"), 6),
+            (ComponentCode::new("ICE"), 4),
+            (ComponentCode::new("TC"), 4),
+            (ComponentCode::new("EXH"), 4),
+            (ComponentCode::new("MGU-K"), 3),
+            (ComponentCode::new("ES"), 3),
+            (ComponentCode::new("PU-CE"), 3),
+            (ComponentCode::new("PU-ANC"), 6),
         ])
     }
 }

@@ -6,6 +6,9 @@
 //! the facts into per-component timelines and proves the oracle equations over
 //! them, flagging every disagreement rather than guessing which witness is right.
 //!
+//! One call covers one season. Counts reset each season and every caller holds
+//! a single one, so nothing here carries a season and nothing checks for one.
+//!
 //! It folds by seat, never by car number. A running count belongs to a team's
 //! car entry, so a mid-season swap or a substitution hands it to whoever fills
 //! the seat next. Keyed by car number the same swap merges two seats into one
@@ -44,7 +47,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::{
     allowance::Allowances,
-    fact::{Car, Claim, ComponentCode, Conformity, Fact, Round, Season, Team},
+    fact::{Car, Claim, ComponentCode, Conformity, Fact, Round, Team},
     seat::{Seat, SeatAmbiguity, Seats},
 };
 
@@ -118,8 +121,6 @@ pub enum Conflict {
     /// the set the new-elements document flags not in conformity. Each element
     /// is a `(seat, component)` pair.
     PenalizedSetMismatch {
-        /// The season the event belongs to.
-        season: Season,
         /// The event.
         round: Round,
         /// The elements infringements penalize.
@@ -127,12 +128,10 @@ pub enum Conflict {
         /// The elements the new-elements document flags not in conformity.
         not_in_conformity: BTreeSet<(Seat, ComponentCode)>,
     },
-    /// A fact references a component the season never seeds, so no allowance
-    /// exists to check it against (a season's valid components are
-    /// exactly its seeded rows).
+    /// A fact references a component the allowances never seed, so no allowance
+    /// exists to check it against (the season's valid components are exactly its
+    /// seeded rows).
     UnknownComponent {
-        /// The season the fact belongs to.
-        season: Season,
         /// The unseeded component.
         component: ComponentCode,
     },
@@ -142,8 +141,6 @@ pub enum Conflict {
     /// window may hold no roster for the event consulted, the car may not have
     /// entered it, or its team's lineage may have stopped.
     UnknownSeat {
-        /// The season the fact belongs to.
-        season: Season,
         /// The event the document belongs to.
         document_round: Round,
         /// The event whose roster the sweep consulted.
@@ -163,8 +160,6 @@ pub enum Conflict {
     /// documents at one event stay two witnesses, whether or not they read the
     /// same roster.
     PrintedTeamMismatch {
-        /// The season the fact belongs to.
-        season: Season,
         /// The event the document belongs to.
         document_round: Round,
         /// The event whose roster the sweep consulted.
@@ -220,13 +215,17 @@ type Series<'a> = (&'a Seat, &'a ComponentCode);
 /// The document a fact came from: the event it belongs to and the number its
 /// header states. Document numbers restart each event, so the round is part of
 /// the identity.
-type Document = (Season, Round, u32);
+type Document = (Round, u32);
 
 /// Every seated series, each holding the events it has data for.
 type Timelines<'a> = BTreeMap<Series<'a>, BTreeMap<Round, RoundData>>;
 
 /// Cross-check `facts` against `allowances` and the seat map, and return every
 /// conflict found.
+///
+/// The facts, the allowances, and the rosters behind `seats` all belong to one
+/// season. Nothing checks it: every caller holds one season by construction, so
+/// a batch merging two would return a wrong answer rather than trip a guard.
 ///
 /// `seats` comes from [`resolve_seats`](crate::resolve_seats) over the rosters
 /// covering the events the facts describe. A snapshot describes the event before
@@ -294,13 +293,12 @@ fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
     let mut misprinted: BTreeSet<(Document, Car)> = BTreeSet::new();
 
     for fact in facts.iter().filter(|fact| !fact.superseded) {
-        let document: Document = (fact.season, fact.round, fact.document);
+        let document: Document = (fact.round, fact.document);
         let roster_round = seating_round(fact);
 
-        let Some(seat) = seats.seat(fact.season, roster_round, fact.car) else {
+        let Some(seat) = seats.seat(roster_round, fact.car) else {
             if unseated.insert((document, fact.car)) {
                 conflicts.push(Conflict::UnknownSeat {
-                    season: fact.season,
                     document_round: fact.round,
                     roster_round,
                     car: fact.car,
@@ -314,7 +312,6 @@ fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
             && misprinted.insert((document, fact.car))
         {
             conflicts.push(Conflict::PrintedTeamMismatch {
-                season: fact.season,
                 document_round: fact.round,
                 roster_round,
                 car: fact.car,
@@ -351,12 +348,11 @@ fn ambiguous_seats(seats: &Seats) -> impl Iterator<Item = Conflict> {
 /// that disagrees with the computed exceedance, and a stated ordinal that
 /// disagrees with the count after the event.
 ///
-/// One flat pass over every `(series, round)` cell. Each unseeded
-/// `(season, component)` yields one `UnknownComponent`, however many events
-/// reference it.
+/// One flat pass over every `(series, round)` cell. Each unseeded component
+/// yields one `UnknownComponent`, however many events reference it.
 fn local_conflicts<'a>(timelines: &Timelines<'a>, allowances: &Allowances) -> Vec<Conflict> {
     let mut conflicts = Vec::new();
-    let mut seen_unknown: BTreeSet<(Season, &'a ComponentCode)> = BTreeSet::new();
+    let mut seen_unknown: BTreeSet<&'a ComponentCode> = BTreeSet::new();
 
     let cells = timelines.iter().flat_map(|(&(seat, component), rounds)| {
         rounds
@@ -365,11 +361,8 @@ fn local_conflicts<'a>(timelines: &Timelines<'a>, allowances: &Allowances) -> Ve
     });
 
     for (seat, component, round, data) in cells {
-        if allowances.allowance(seat.season, component).is_none()
-            && seen_unknown.insert((seat.season, component))
-        {
+        if allowances.allowance(component).is_none() && seen_unknown.insert(component) {
             conflicts.push(Conflict::UnknownComponent {
-                season: seat.season,
                 component: component.clone(),
             });
         }
@@ -389,7 +382,7 @@ fn local_conflicts<'a>(timelines: &Timelines<'a>, allowances: &Allowances) -> Ve
         }
 
         if let (Some(conformity), Some(count_after)) = (data.conformity, count_after)
-            && let Some(computed_exceeds) = allowances.exceeds(seat.season, component, count_after)
+            && let Some(computed_exceeds) = allowances.exceeds(component, count_after)
         {
             let stated_not_in_conformity = conformity == Conformity::NotInConformity;
             if stated_not_in_conformity != computed_exceeds {
@@ -451,8 +444,8 @@ fn snapshot_disagreements(timelines: &Timelines<'_>) -> Vec<Conflict> {
 
 /// The per-event equation: penalized elements equal the not-in-conformity set.
 ///
-/// One map groups both sets per `(season, round)`. An event surfaces when its
-/// two sets differ, and only then does either set need owning.
+/// One map groups both sets per round. An event surfaces when its two sets
+/// differ, and only then does either set need owning.
 fn penalized_set_conflicts(timelines: &Timelines<'_>) -> Vec<Conflict> {
     #[derive(Default)]
     struct EventSets<'a> {
@@ -467,19 +460,19 @@ fn penalized_set_conflicts(timelines: &Timelines<'_>) -> Vec<Conflict> {
             .collect()
     }
 
-    let mut events: BTreeMap<(Season, Round), EventSets<'_>> = BTreeMap::new();
+    let mut events: BTreeMap<Round, EventSets<'_>> = BTreeMap::new();
     for (&(seat, component), rounds) in timelines {
         for (&round, data) in rounds {
             if data.penalized {
                 events
-                    .entry((seat.season, round))
+                    .entry(round)
                     .or_default()
                     .penalized
                     .insert((seat, component));
             }
             if data.conformity == Some(Conformity::NotInConformity) {
                 events
-                    .entry((seat.season, round))
+                    .entry(round)
                     .or_default()
                     .not_in_conformity
                     .insert((seat, component));
@@ -491,14 +484,13 @@ fn penalized_set_conflicts(timelines: &Timelines<'_>) -> Vec<Conflict> {
         .into_iter()
         .filter_map(
             |(
-                (season, round),
+                round,
                 EventSets {
                     penalized,
                     not_in_conformity,
                 },
             )| {
                 (penalized != not_in_conformity).then(|| Conflict::PenalizedSetMismatch {
-                    season,
                     round,
                     penalized: owned(penalized),
                     not_in_conformity: owned(not_in_conformity),
@@ -520,7 +512,6 @@ mod tests {
 
     use crate::seat::{Roster, RosterEntry, Slot, resolve_seats};
 
-    const SEASON: Season = 2026;
     const RED_BULL: &str = "Red Bull";
     const RACING_BULLS: &str = "Racing Bulls";
     const FERRARI: &str = "Ferrari";
@@ -549,16 +540,11 @@ mod tests {
     }
 
     fn roster(round: Round, entries: Vec<RosterEntry>) -> Roster {
-        Roster {
-            season: SEASON,
-            round,
-            entries,
-        }
+        Roster { round, entries }
     }
 
     fn seat(team: &str, slot: Slot) -> Seat {
         Seat {
-            season: SEASON,
             team: team.into(),
             slot,
         }
@@ -629,7 +615,7 @@ mod tests {
         claim: Claim,
         document: u32,
     ) -> Fact {
-        Fact::new(SEASON, round, car, component, claim, document).with_printed_team(team)
+        Fact::new(round, car, component, claim, document).with_printed_team(team)
     }
 
     fn snapshot(round: Round, car: Car, team: &str, count: u32) -> Fact {
@@ -879,7 +865,6 @@ mod tests {
 
         assert!(
             conflicts.contains(&Conflict::PrintedTeamMismatch {
-                season: SEASON,
                 document_round: 3,
                 roster_round: 2,
                 car: 22,
@@ -905,7 +890,6 @@ mod tests {
 
         assert!(
             conflicts.contains(&Conflict::PrintedTeamMismatch {
-                season: SEASON,
                 document_round: 3,
                 roster_round: 3,
                 car: 22,
@@ -930,7 +914,6 @@ mod tests {
             sweep(&facts, &allowances(), &seats()),
             vec![
                 Conflict::PrintedTeamMismatch {
-                    season: SEASON,
                     document_round: 2,
                     roster_round: 1,
                     car: 30,
@@ -938,7 +921,6 @@ mod tests {
                     roster_team: RED_BULL.into(),
                 },
                 Conflict::PrintedTeamMismatch {
-                    season: SEASON,
                     document_round: 2,
                     roster_round: 2,
                     car: 30,
@@ -962,7 +944,6 @@ mod tests {
         // The payload names the two rounds, not the document, so the two
         // witnesses read alike.
         let misprint = Conflict::PrintedTeamMismatch {
-            season: SEASON,
             document_round: 1,
             roster_round: 1,
             car: 30,
@@ -988,7 +969,6 @@ mod tests {
         }
 
         let misprint = Conflict::PrintedTeamMismatch {
-            season: SEASON,
             document_round: 3,
             roster_round: 3,
             car: 16,
@@ -1013,7 +993,6 @@ mod tests {
             sweep(&facts, &allowances(), &seats()),
             vec![
                 Conflict::PrintedTeamMismatch {
-                    season: SEASON,
                     document_round: 1,
                     roster_round: 1,
                     car: 30,
@@ -1021,7 +1000,6 @@ mod tests {
                     roster_team: RED_BULL.into(),
                 },
                 Conflict::PrintedTeamMismatch {
-                    season: SEASON,
                     document_round: 2,
                     roster_round: 1,
                     car: 30,
@@ -1044,7 +1022,6 @@ mod tests {
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
             vec![Conflict::PrintedTeamMismatch {
-                season: SEASON,
                 document_round: 2,
                 roster_round: 2,
                 car: 30,
@@ -1072,7 +1049,6 @@ mod tests {
         assert_eq!(
             sweep(&[], &allowances(), &unpairable),
             vec![Conflict::AmbiguousSeat(SeatAmbiguity {
-                season: SEASON,
                 round: 2,
                 team: RED_BULL.into(),
                 vacated: vec![0, 1],
@@ -1091,7 +1067,6 @@ mod tests {
         assert_eq!(
             conflicts,
             vec![Conflict::UnknownSeat {
-                season: SEASON,
                 document_round: 1,
                 roster_round: 1,
                 car: 77,
@@ -1111,7 +1086,6 @@ mod tests {
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
             vec![Conflict::UnknownSeat {
-                season: SEASON,
                 document_round: 1,
                 roster_round: 1,
                 car: 77,
@@ -1129,7 +1103,6 @@ mod tests {
         ];
 
         let unseated = Conflict::UnknownSeat {
-            season: SEASON,
             document_round: 1,
             roster_round: 1,
             car: 77,
@@ -1152,13 +1125,11 @@ mod tests {
             sweep(&facts, &allowances(), &seats()),
             vec![
                 Conflict::UnknownSeat {
-                    season: SEASON,
                     document_round: 1,
                     roster_round: 1,
                     car: 77,
                 },
                 Conflict::UnknownSeat {
-                    season: SEASON,
                     document_round: 2,
                     roster_round: 1,
                     car: 77,
@@ -1178,7 +1149,6 @@ mod tests {
         assert_eq!(
             conflicts,
             vec![Conflict::UnknownSeat {
-                season: SEASON,
                 document_round: 3,
                 roster_round: 2,
                 car: 22,
@@ -1297,7 +1267,6 @@ mod tests {
 
         assert!(
             conflicts.contains(&Conflict::PenalizedSetMismatch {
-                season: SEASON,
                 round: 3,
                 penalized: BTreeSet::from([(seat(FERRARI, 0), ComponentCode::new(ICE))]),
                 not_in_conformity: BTreeSet::new(),
@@ -1323,7 +1292,6 @@ mod tests {
         assert_eq!(
             conflicts,
             vec![Conflict::UnknownComponent {
-                season: SEASON,
                 component: ComponentCode::new("GEARBOX"),
             }]
         );
@@ -1353,7 +1321,7 @@ mod tests {
     #[test]
     fn exceedance_flags_a_count_above_the_allowance() {
         assert_eq!(
-            allowances().exceeds(SEASON, &ComponentCode::new(ICE), 5),
+            allowances().exceeds(&ComponentCode::new(ICE), 5),
             Some(true)
         );
     }
@@ -1361,7 +1329,7 @@ mod tests {
     #[test]
     fn exceedance_clears_a_count_at_the_allowance() {
         assert_eq!(
-            allowances().exceeds(SEASON, &ComponentCode::new(ICE), 4),
+            allowances().exceeds(&ComponentCode::new(ICE), 4),
             Some(false)
         );
     }
@@ -1369,7 +1337,7 @@ mod tests {
     #[test]
     fn exceedance_clears_a_count_below_the_allowance() {
         assert_eq!(
-            allowances().exceeds(SEASON, &ComponentCode::new(ICE), 3),
+            allowances().exceeds(&ComponentCode::new(ICE), 3),
             Some(false)
         );
     }
@@ -1377,7 +1345,7 @@ mod tests {
     #[test]
     fn exceedance_is_unknown_for_an_unseeded_component() {
         assert_eq!(
-            allowances().exceeds(SEASON, &ComponentCode::new("GEARBOX"), 1),
+            allowances().exceeds(&ComponentCode::new("GEARBOX"), 1),
             None
         );
     }

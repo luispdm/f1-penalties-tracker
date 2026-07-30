@@ -105,7 +105,7 @@ pub enum Conformity {
     NotInConformity,
 }
 
-/// What a fact claims about its `(season, round, car, component)`.
+/// What a fact claims about its `(round, car, component)`.
 ///
 /// The variants keep two things apart that must never merge. Only
 /// [`SnapshotCount`](Claim::SnapshotCount) and
@@ -149,8 +149,6 @@ pub enum Claim {
 /// sweep can relate consecutive ones in memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fact {
-    /// The season the claim belongs to, for example `2026`.
-    pub season: Season,
     /// The event's ordering within the season, counting from one.
     pub round: Round,
     /// The car number the claim is about.
@@ -183,7 +181,6 @@ pub struct Fact {
 impl Fact {
     /// Build a live (not superseded) fact.
     pub fn new(
-        season: Season,
         round: Round,
         car: Car,
         component: impl Into<ComponentCode>,
@@ -191,7 +188,6 @@ impl Fact {
         document: u32,
     ) -> Self {
         Self {
-            season,
             round,
             car,
             component: component.into(),
