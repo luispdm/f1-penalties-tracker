@@ -1,7 +1,7 @@
 //! Domain layer: components, allowances, penalties, invariants.
 //!
 //! Pure, no IO. The crate works on [`Fact`] values, built by hand in tests and,
-//! later, by the document parsers. It carries three things:
+//! later, by the document parsers. It carries the following:
 //!
 //! - [`Fact`] and its [`Claim`] kinds, the verbatim record of what one document
 //!   states about one component (store raw facts, compute the view).
