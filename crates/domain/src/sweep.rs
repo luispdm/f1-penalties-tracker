@@ -29,6 +29,15 @@
 //! Reconciliation (issue #31) computes supersession and marks the facts; the
 //! sweep here honours the mark.
 //!
+//! The printed team is checked by grouping, and no team name is ever compared to
+//! another source's. The documents print "Red Bull Racing Honda RBPT" where the
+//! roster feed returns "Red Bull Racing", so name equality would fire on nearly
+//! every row and bury the disagreements worth reading. Only the grouping carries
+//! information: over the cars one document lists, two printed under one string
+//! must be teammates in the roster it seated on, and two printed under different
+//! strings must not be. A label that never reaches a seat costs nothing when it
+//! is wrong, so there is no alias table and no normalisation to keep current.
+//!
 //! The equations proved:
 //!
 //! - the count after an event equals the prior snapshot plus that event's new
@@ -40,8 +49,8 @@
 //! - an infringement's stated ordinal equals the computed count after its event;
 //! - the set of elements an infringement penalizes equals the set the
 //!   new-elements document flags not in conformity;
-//! - the team a document prints equals the team the roster it seated on entered
-//!   the car for.
+//! - a document's team strings group the cars it lists the way the roster it
+//!   seated on groups them.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -153,23 +162,28 @@ pub enum Conflict {
     /// landed on the team: a diff nobody can pair is a mapping for a human to
     /// supply, never a guess.
     AmbiguousSeat(SeatAmbiguity),
-    /// A document names a team the roster it seated on did not enter the car
-    /// for. A snapshot is checked against the roster of the previous event, a
-    /// new-elements or infringement document against its own. Reported once per
-    /// `(document, car)`, however many components the document lists for it. Two
-    /// documents at one event stay two witnesses, whether or not they read the
-    /// same roster.
-    PrintedTeamMismatch {
+    /// A document's team strings group the cars it lists differently from the
+    /// roster it seated on: one string covers cars the roster splits between
+    /// teams, or one team's cars come under two strings. A snapshot is grouped
+    /// against the roster of the previous event, a new-elements or infringement
+    /// document against its own.
+    ///
+    /// Both maps hold the cars that disagree, so the payload names them: the
+    /// document's grouping keyed by the string it prints, the roster's keyed by
+    /// the team it entered them for. A car the document prints under two strings
+    /// appears under both. The cars whose grouping both sides agree on stay out.
+    ///
+    /// Reported once per document, however many rows disagree. Two documents at
+    /// one event stay two witnesses, whether or not they read the same roster.
+    TeamGroupingMismatch {
         /// The event the document belongs to.
         document_round: Round,
         /// The event whose roster the sweep consulted.
         roster_round: Round,
-        /// The car number the document prints.
-        car: Car,
-        /// The team the document prints.
-        printed_team: Team,
-        /// The team that roster entered the car for.
-        roster_team: Team,
+        /// The disagreeing cars the document prints under each team string.
+        printed: BTreeMap<Team, BTreeSet<Car>>,
+        /// The same cars, under the team the roster entered each of them for.
+        entered: BTreeMap<Team, BTreeSet<Car>>,
     },
 }
 
@@ -219,6 +233,24 @@ type Document = (Round, u32);
 
 /// Every seated series, each holding the events it has data for.
 type Timelines<'a> = BTreeMap<Series<'a>, BTreeMap<Round, RoundData>>;
+
+/// One document read against one event's roster: the unit the team grouping is
+/// compared over.
+///
+/// Every document describes one event, so it reads one roster and a reading is
+/// the document. A document whose claims looked back past different events would
+/// group each roster's rows on their own instead of cutting two grids together.
+type Reading = (Document, Round);
+
+/// The cars one reading puts under each `(printed team, entered team)` pair.
+///
+/// The pair keys the cars, not the other way round, because one document can
+/// print one car under two team strings. That is the misparse this catches, so
+/// nothing may assume a car sits under a single label.
+type Cells<'a> = BTreeMap<(&'a Team, &'a Team), BTreeSet<Car>>;
+
+/// Every document's grouping, by the roster each read.
+type Readings<'a> = BTreeMap<Reading, Cells<'a>>;
 
 /// Cross-check `facts` against `allowances` and the seat map, and return every
 /// conflict found.
@@ -279,18 +311,24 @@ fn seating_round(fact: &Fact) -> Round {
 }
 
 /// Fold the live facts onto the seats the rosters give them, flagging every fact
-/// the map cannot seat and every printed team the map contradicts.
+/// the map cannot seat and every document whose team grouping the rosters
+/// contradict.
 ///
 /// A fact that cannot be seated joins no timeline, so leaving it unreported
-/// would drop it from every equation and pass silently.
+/// would drop it from every equation and pass silently. It joins no grouping
+/// either: a car with no seat has no team to be grouped against, and it already
+/// reports once as unseated.
 ///
-/// Both dedupe keys name the document, so one document's several component rows
-/// fold into one conflict while two documents stay two witnesses.
+/// A row with no printed team constrains no grouping, so it is left out of one.
+///
+/// The unseated dedupe key and the grouping key both name the document, so one
+/// document's several component rows fold into one conflict while two documents
+/// stay two witnesses.
 fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
     let mut timelines = Timelines::new();
     let mut conflicts = Vec::new();
     let mut unseated: BTreeSet<(Document, Car)> = BTreeSet::new();
-    let mut misprinted: BTreeSet<(Document, Car)> = BTreeSet::new();
+    let mut readings = Readings::new();
 
     for fact in facts.iter().filter(|fact| !fact.superseded) {
         let document: Document = (fact.round, fact.document);
@@ -307,17 +345,13 @@ fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
             continue;
         };
 
-        if let Some(printed) = fact.printed_team.as_ref()
-            && printed != &seat.team
-            && misprinted.insert((document, fact.car))
-        {
-            conflicts.push(Conflict::PrintedTeamMismatch {
-                document_round: fact.round,
-                roster_round,
-                car: fact.car,
-                printed_team: printed.clone(),
-                roster_team: seat.team.clone(),
-            });
+        if let Some(printed) = fact.printed_team.as_ref() {
+            readings
+                .entry((document, roster_round))
+                .or_default()
+                .entry((printed, &seat.team))
+                .or_default()
+                .insert(fact.car);
         }
 
         timelines
@@ -328,10 +362,87 @@ fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
             .absorb(&fact.claim);
     }
 
+    conflicts.extend(grouping_conflicts(&readings));
+
     Seated {
         timelines,
         conflicts,
     }
+}
+
+/// Flag every document whose team strings group its cars differently from the
+/// roster it read.
+fn grouping_conflicts(readings: &Readings<'_>) -> impl Iterator<Item = Conflict> {
+    readings
+        .iter()
+        .filter_map(|(&((document_round, _), roster_round), cells)| {
+            grouping_conflict(document_round, roster_round, cells)
+        })
+}
+
+/// The conflict one reading raises, if the two groupings disagree.
+///
+/// They agree when each printed string covers one entered team and each entered
+/// team sits under one printed string: one class against one class, so both sides
+/// cut the reading's cars the same way, whatever the classes are called. Any
+/// other shape merges teams the roster splits, splits a team the roster keeps
+/// whole, or both.
+///
+/// The cars in the cells that break the correspondence are the cars that
+/// disagree. A cell whose two ends each stand alone agrees, so it stays out of
+/// the payload and a document with one wrong label among right ones reports only
+/// the rows at issue.
+fn grouping_conflict(
+    document_round: Round,
+    roster_round: Round,
+    cells: &Cells<'_>,
+) -> Option<Conflict> {
+    let mut entered_per_printed: BTreeMap<&Team, BTreeSet<&Team>> = BTreeMap::new();
+    let mut printed_per_entered: BTreeMap<&Team, BTreeSet<&Team>> = BTreeMap::new();
+    for &(printed, entered) in cells.keys() {
+        entered_per_printed
+            .entry(printed)
+            .or_default()
+            .insert(entered);
+        printed_per_entered
+            .entry(entered)
+            .or_default()
+            .insert(printed);
+    }
+    let merging = spanning_teams(&entered_per_printed);
+    let split = spanning_teams(&printed_per_entered);
+
+    let mut printed_groups: BTreeMap<Team, BTreeSet<Car>> = BTreeMap::new();
+    let mut entered_groups: BTreeMap<Team, BTreeSet<Car>> = BTreeMap::new();
+    for (&(printed, entered), cars) in cells {
+        if merging.contains(printed) || split.contains(entered) {
+            printed_groups
+                .entry(printed.clone())
+                .or_default()
+                .extend(cars);
+            entered_groups
+                .entry(entered.clone())
+                .or_default()
+                .extend(cars);
+        }
+    }
+
+    (!printed_groups.is_empty()).then_some(Conflict::TeamGroupingMismatch {
+        document_round,
+        roster_round,
+        printed: printed_groups,
+        entered: entered_groups,
+    })
+}
+
+/// The teams on one side of the grouping that reach more than one team on the
+/// other: the classes the two sides cut differently.
+fn spanning_teams<'a>(relation: &BTreeMap<&'a Team, BTreeSet<&'a Team>>) -> BTreeSet<&'a Team> {
+    relation
+        .iter()
+        .filter(|(_, opposite)| opposite.len() > 1)
+        .map(|(&team, _)| team)
+        .collect()
 }
 
 /// Every roster diff the seat resolver refused to guess.
@@ -512,9 +623,16 @@ mod tests {
 
     use crate::seat::{Roster, RosterEntry, Slot, resolve_seats};
 
+    /// The teams as the rosters enter them.
     const RED_BULL: &str = "Red Bull";
     const RACING_BULLS: &str = "Racing Bulls";
     const FERRARI: &str = "Ferrari";
+
+    /// The same teams as the documents print them: the sponsor names the roster
+    /// feed leaves out, so no printed string equals a roster string.
+    const RED_BULL_PRINTED: &str = "Red Bull Racing Honda RBPT";
+    const RACING_BULLS_PRINTED: &str = "Racing Bulls Honda RBPT";
+    const FERRARI_PRINTED: &str = "Scuderia Ferrari HP";
 
     /// Every fact in the fixture is about the ICE, the component whose count the
     /// swap and the substitution carry across.
@@ -755,6 +873,47 @@ mod tests {
         })
     }
 
+    /// The same facts with every team string in the form the documents print,
+    /// so no string on a fact equals the roster's name for its team.
+    fn sponsored_facts() -> Vec<Fact> {
+        clean_facts()
+            .into_iter()
+            .map(|fact| Fact {
+                printed_team: fact.printed_team.as_ref().map(sponsored),
+                ..fact
+            })
+            .collect()
+    }
+
+    /// The string the documents print for a roster team.
+    fn sponsored(team: &Team) -> Team {
+        match team.as_str() {
+            RED_BULL => RED_BULL_PRINTED,
+            RACING_BULLS => RACING_BULLS_PRINTED,
+            FERRARI => FERRARI_PRINTED,
+            printed => printed,
+        }
+        .into()
+    }
+
+    /// Rewrite the team every row of one document prints against `car`.
+    fn reprint(facts: &mut [Fact], round: Round, document: u32, car: Car, team: &str) {
+        for fact in facts
+            .iter_mut()
+            .filter(|fact| fact.round == round && fact.document == document && fact.car == car)
+        {
+            fact.printed_team = Some(team.into());
+        }
+    }
+
+    /// One side of a grouping: the cars under each team.
+    fn grouped<const N: usize>(groups: [(&str, &[Car]); N]) -> BTreeMap<Team, BTreeSet<Car>> {
+        groups
+            .into_iter()
+            .map(|(team, cars)| (team.into(), cars.iter().copied().collect()))
+            .collect()
+    }
+
     #[test]
     fn clean_facts_over_the_rosters_that_record_the_moves_report_no_conflicts() {
         assert_eq!(sweep(&clean_facts(), &allowances(), &seats()), Vec::new());
@@ -851,52 +1010,154 @@ mod tests {
     }
 
     #[test]
-    fn a_snapshot_naming_the_team_the_car_moves_to_is_a_conflict() {
-        let mut facts = clean_facts();
-        // Round 3's snapshot describes round 2, where car 22 was still a Racing
-        // Bulls entry.
-        for fact in matching(&mut facts, 3, 22) {
-            if matches!(fact.claim, Claim::SnapshotCount(_)) {
-                fact.printed_team = Some(RED_BULL.into());
-            }
-        }
-
-        let conflicts = sweep(&facts, &allowances(), &seats());
-
-        assert!(
-            conflicts.contains(&Conflict::PrintedTeamMismatch {
-                document_round: 3,
-                roster_round: 2,
-                car: 22,
-                printed_team: RED_BULL.into(),
-                roster_team: RACING_BULLS.into(),
-            }),
-            "{conflicts:?}"
+    fn a_document_naming_teams_no_roster_uses_raises_nothing() {
+        // Every string a document prints carries the sponsor names the roster
+        // feed leaves out, so not one of them equals a roster team. The grouping
+        // is the same either way.
+        assert_eq!(
+            sweep(&sponsored_facts(), &allowances(), &seats()),
+            Vec::new()
         );
     }
 
     #[test]
-    fn a_new_elements_document_naming_the_team_the_car_left_is_a_conflict() {
+    fn a_document_naming_one_cars_team_wrongly_raises_nothing() {
+        // A label on a lone car groups nothing with anything, so the roster has
+        // no grouping to contradict, however wrong the label.
+        let facts = vec![fitted_component(
+            2,
+            30,
+            FERRARI_PRINTED,
+            ICE,
+            1,
+            Conformity::InConformity,
+        )];
+
+        assert_eq!(sweep(&facts, &allowances(), &seats()), Vec::new());
+    }
+
+    #[test]
+    fn two_cars_the_roster_keeps_together_under_one_string_raise_nothing() {
+        // Cars 1 and 30 are both Red Bull entries at round 2, and the document
+        // prints both under one string.
+        let facts = vec![
+            fitted_component(2, 1, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(2, 30, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+        ];
+
+        assert_eq!(sweep(&facts, &allowances(), &seats()), Vec::new());
+    }
+
+    #[test]
+    fn a_document_grouping_two_cars_the_roster_splits_is_a_conflict() {
         let mut facts = clean_facts();
         // Round 3's new-elements document describes round 3, where car 22 is a
-        // Red Bull entry.
-        for fact in matching(&mut facts, 3, 22) {
-            if matches!(fact.claim, Claim::ElementsFitted { .. }) {
-                fact.printed_team = Some(RACING_BULLS.into());
-            }
-        }
+        // Red Bull entry and car 30 a Racing Bulls one. Printing 22 under Racing
+        // Bulls puts the two under one string the roster splits.
+        reprint(&mut facts, 3, NEW_ELEMENTS_DOC, 22, RACING_BULLS);
 
-        let conflicts = sweep(&facts, &allowances(), &seats());
-
-        assert!(
-            conflicts.contains(&Conflict::PrintedTeamMismatch {
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![Conflict::TeamGroupingMismatch {
                 document_round: 3,
                 roster_round: 3,
-                car: 22,
-                printed_team: RACING_BULLS.into(),
-                roster_team: RED_BULL.into(),
-            }),
-            "{conflicts:?}"
+                printed: grouped([(RACING_BULLS, &[22, 30])]),
+                entered: grouped([(RED_BULL, &[22]), (RACING_BULLS, &[30])]),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_snapshot_is_grouped_against_the_previous_events_roster() {
+        let mut facts = clean_facts();
+        // Round 3's snapshot describes round 2, where car 22 was still a Racing
+        // Bulls entry and car 30 a Red Bull one. Printing 22 under Red Bull
+        // groups it with 30, which that roster does not.
+        reprint(&mut facts, 3, SNAPSHOT_DOC, 22, RED_BULL);
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![Conflict::TeamGroupingMismatch {
+                document_round: 3,
+                roster_round: 2,
+                printed: grouped([(RED_BULL, &[22, 30])]),
+                entered: grouped([(RED_BULL, &[30]), (RACING_BULLS, &[22])]),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_car_one_document_prints_under_two_teams_is_a_conflict() {
+        // The 2025 Chinese GP snapshot in miniature: car 30 appears in two team
+        // blocks, one with its own teammate and one with car 22, which the
+        // roster enters for another team. No pair of names disagrees, so only the
+        // grouping catches it.
+        let facts = vec![
+            snapshot(2, 1, RED_BULL_PRINTED, 0),
+            snapshot(2, 30, RED_BULL_PRINTED, 0),
+            fact(
+                2,
+                30,
+                RACING_BULLS_PRINTED,
+                TC,
+                Claim::SnapshotCount(0),
+                SNAPSHOT_DOC,
+            ),
+            snapshot(2, 22, RACING_BULLS_PRINTED, 0),
+        ];
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![Conflict::TeamGroupingMismatch {
+                document_round: 2,
+                roster_round: 1,
+                printed: grouped([
+                    (RED_BULL_PRINTED, &[1, 30]),
+                    (RACING_BULLS_PRINTED, &[22, 30]),
+                ]),
+                entered: grouped([(RED_BULL, &[1, 30]), (RACING_BULLS, &[22])]),
+            }]
+        );
+    }
+
+    #[test]
+    fn a_document_listing_part_of_the_grid_is_checked_over_the_cars_it_lists() {
+        // Two of the grid's six cars, from two teams, under one string.
+        let facts = vec![
+            fitted_component(2, 30, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(2, 22, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+        ];
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![Conflict::TeamGroupingMismatch {
+                document_round: 2,
+                roster_round: 2,
+                printed: grouped([(RED_BULL_PRINTED, &[22, 30])]),
+                entered: grouped([(RED_BULL, &[30]), (RACING_BULLS, &[22])]),
+            }]
+        );
+    }
+
+    #[test]
+    fn one_documents_component_rows_are_one_conflict() {
+        // One new-elements document lists each car once per component, and
+        // groups the two cars alike on every row.
+        let facts = vec![
+            fitted_component(2, 30, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(2, 30, RED_BULL_PRINTED, TC, 1, Conformity::InConformity),
+            fitted_component(2, 22, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(2, 22, RED_BULL_PRINTED, TC, 1, Conformity::InConformity),
+        ];
+
+        assert_eq!(
+            sweep(&facts, &allowances(), &seats()),
+            vec![Conflict::TeamGroupingMismatch {
+                document_round: 2,
+                roster_round: 2,
+                printed: grouped([(RED_BULL_PRINTED, &[22, 30])]),
+                entered: grouped([(RED_BULL, &[30]), (RACING_BULLS, &[22])]),
+            }]
         );
     }
 
@@ -905,29 +1166,20 @@ mod tests {
         let mut facts = clean_facts();
         // Car 30 is a Red Bull entry at rounds 1 and 2, so round 2's snapshot and
         // its new-elements document read different rosters that agree on the
-        // team. Both misprint it, and each stays its own witness.
-        for fact in matching(&mut facts, 2, 30) {
-            fact.printed_team = Some(FERRARI.into());
-        }
+        // team. Both print it in Ferrari's block, and each stays its own witness.
+        reprint(&mut facts, 2, SNAPSHOT_DOC, 30, FERRARI);
+        reprint(&mut facts, 2, NEW_ELEMENTS_DOC, 30, FERRARI);
+
+        let misgrouped = |roster_round| Conflict::TeamGroupingMismatch {
+            document_round: 2,
+            roster_round,
+            printed: grouped([(FERRARI, &[16, 30, 44])]),
+            entered: grouped([(RED_BULL, &[30]), (FERRARI, &[16, 44])]),
+        };
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
-            vec![
-                Conflict::PrintedTeamMismatch {
-                    document_round: 2,
-                    roster_round: 1,
-                    car: 30,
-                    printed_team: FERRARI.into(),
-                    roster_team: RED_BULL.into(),
-                },
-                Conflict::PrintedTeamMismatch {
-                    document_round: 2,
-                    roster_round: 2,
-                    car: 30,
-                    printed_team: FERRARI.into(),
-                    roster_team: RED_BULL.into(),
-                },
-            ]
+            vec![misgrouped(1), misgrouped(2)]
         );
     }
 
@@ -935,98 +1187,68 @@ mod tests {
     fn two_documents_at_the_seasons_first_event_are_two_conflicts() {
         let mut facts = clean_facts();
         // Round 1 has nothing before it, so its snapshot and its new-elements
-        // document both read roster 1. Both misprint car 30's team, and each
-        // stays its own witness.
-        for fact in matching(&mut facts, 1, 30) {
-            fact.printed_team = Some(FERRARI.into());
-        }
+        // document both read roster 1. Both print car 30 in Ferrari's block, and
+        // each stays its own witness.
+        reprint(&mut facts, 1, SNAPSHOT_DOC, 30, FERRARI);
+        reprint(&mut facts, 1, NEW_ELEMENTS_DOC, 30, FERRARI);
 
         // The payload names the two rounds, not the document, so the two
         // witnesses read alike.
-        let misprint = Conflict::PrintedTeamMismatch {
+        let misgrouped = Conflict::TeamGroupingMismatch {
             document_round: 1,
             roster_round: 1,
-            car: 30,
-            printed_team: FERRARI.into(),
-            roster_team: RED_BULL.into(),
+            printed: grouped([(FERRARI, &[16, 30, 44])]),
+            entered: grouped([(RED_BULL, &[30]), (FERRARI, &[16, 44])]),
         };
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
-            vec![misprint.clone(), misprint]
+            vec![misgrouped.clone(), misgrouped]
         );
     }
 
     #[test]
-    fn a_new_elements_document_and_an_infringement_are_two_conflicts() {
-        let mut facts = clean_facts();
-        // Both describe round 3 and read roster 3, so only the document tells
-        // them apart. Car 16's snapshot is left alone: it reads roster 2.
-        for fact in matching(&mut facts, 3, 16) {
-            if !matches!(fact.claim, Claim::SnapshotCount(_)) {
-                fact.printed_team = Some(RED_BULL.into());
-            }
-        }
-
-        let misprint = Conflict::PrintedTeamMismatch {
-            document_round: 3,
-            roster_round: 3,
-            car: 16,
-            printed_team: RED_BULL.into(),
-            roster_team: FERRARI.into(),
-        };
-
-        assert_eq!(
-            sweep(&facts, &allowances(), &seats()),
-            vec![misprint.clone(), misprint]
-        );
-    }
-
-    #[test]
-    fn one_document_number_at_two_events_misprinting_a_team_is_two_conflicts() {
+    fn one_document_number_at_two_events_misgrouping_two_cars_is_two_conflicts() {
         // Numbers restart each event, so both snapshots print number 1. Round
-        // 2's snapshot describes round 1, so both read roster 1, and both
-        // misprint car 30's team. Only the round tells the two documents apart.
-        let facts = vec![snapshot(1, 30, FERRARI, 0), snapshot(2, 30, FERRARI, 0)];
+        // 2's snapshot describes round 1, so both read roster 1, and both group
+        // cars 30 and 22 under one string. Only the round tells the two documents
+        // apart.
+        let facts = vec![
+            snapshot(1, 30, RED_BULL_PRINTED, 0),
+            snapshot(1, 22, RED_BULL_PRINTED, 0),
+            snapshot(2, 30, RED_BULL_PRINTED, 0),
+            snapshot(2, 22, RED_BULL_PRINTED, 0),
+        ];
+
+        let misgrouped = |document_round| Conflict::TeamGroupingMismatch {
+            document_round,
+            roster_round: 1,
+            printed: grouped([(RED_BULL_PRINTED, &[22, 30])]),
+            entered: grouped([(RED_BULL, &[30]), (RACING_BULLS, &[22])]),
+        };
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
-            vec![
-                Conflict::PrintedTeamMismatch {
-                    document_round: 1,
-                    roster_round: 1,
-                    car: 30,
-                    printed_team: FERRARI.into(),
-                    roster_team: RED_BULL.into(),
-                },
-                Conflict::PrintedTeamMismatch {
-                    document_round: 2,
-                    roster_round: 1,
-                    car: 30,
-                    printed_team: FERRARI.into(),
-                    roster_team: RED_BULL.into(),
-                },
-            ]
+            vec![misgrouped(1), misgrouped(2)]
         );
     }
 
     #[test]
-    fn one_documents_component_rows_are_one_conflict() {
-        // One new-elements document lists car 30 once per component and
-        // misprints the team on both rows.
+    fn a_car_the_rosters_cannot_seat_joins_no_grouping() {
+        // Car 77 shares a string with car 30, which the roster seats at Red Bull.
+        // Seated anywhere else it would misgroup; unseated it reports once, as
+        // unseated.
         let facts = vec![
-            fitted_component(2, 30, FERRARI, ICE, 1, Conformity::InConformity),
-            fitted_component(2, 30, FERRARI, TC, 1, Conformity::InConformity),
+            fitted_component(1, 30, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(1, 77, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
         ];
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
-            vec![Conflict::PrintedTeamMismatch {
-                document_round: 2,
-                roster_round: 2,
-                car: 30,
-                printed_team: FERRARI.into(),
-                roster_team: RED_BULL.into(),
+            vec![Conflict::UnknownSeat {
+                document_round: 1,
+                roster_round: 1,
+                car: 77,
             }]
         );
     }
