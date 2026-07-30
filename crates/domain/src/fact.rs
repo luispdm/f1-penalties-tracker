@@ -11,7 +11,7 @@ use std::fmt;
 pub type Season = u16;
 
 /// A car number.
-pub type Car = u16;
+pub type Car = u8;
 
 /// An event's ordering within a season, counting from one.
 pub type Round = u8;
