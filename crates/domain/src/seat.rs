@@ -5,11 +5,11 @@
 //! fold it by car number and the swap mixes two seats, then raises a false
 //! conflict on correct FIA data.
 //!
-//! A [`Seat`] is `(season, team, slot)`. One rule produces the
-//! slot at every event: a car entering a team with no vacated seat to inherit
-//! takes a fresh slot, and arrivals are seated in ascending car-number order. A
-//! team's first event vacates nothing, so its cars number by car number; every
-//! later event carries those seats forward.
+//! A [`Seat`] is `(team, slot)`. One rule produces the slot at every event: a
+//! car entering a team with no vacated seat to inherit takes a fresh slot, and
+//! arrivals are seated in ascending car-number order. A team's first event
+//! vacates nothing, so its cars number by car number; every later event carries
+//! those seats forward.
 //!
 //! [`resolve_seats`] diffs each team between consecutive events. One car out and
 //! one car in transfers the seat, which covers a mid-season swap and an
@@ -19,12 +19,11 @@
 //! to vacated seats becomes a [`SeatAmbiguity`] and stops that team's lineage; a
 //! human supplies the mapping.
 //!
-//! The seat is computed here and never written onto a fact. It
-//! groups within one season.
+//! The seat is computed here and never written onto a fact.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::fact::{Car, Round, Season, Team};
+use crate::fact::{Car, Round, Team};
 
 /// A driver name, as the roster states it.
 ///
@@ -41,8 +40,6 @@ pub type Slot = u8;
 /// the identity.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Seat {
-    /// The season the seat belongs to.
-    pub season: Season,
     /// The team fielding the entry.
     pub team: Team,
     /// The entry's index within the team.
@@ -67,8 +64,6 @@ pub struct RosterEntry {
 /// entry, so a car never sits in two teams at once.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Roster {
-    /// The season the event belongs to.
-    pub season: Season,
     /// The event's ordering within the season, counting from one.
     pub round: Round,
     /// The entered race drivers.
@@ -85,8 +80,6 @@ pub struct Roster {
 /// mapping to a human.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeatAmbiguity {
-    /// The season the event belongs to.
-    pub season: Season,
     /// The event whose diff could not be paired.
     pub round: Round,
     /// The team whose lineage stops here.
@@ -101,54 +94,77 @@ pub struct SeatAmbiguity {
 /// The seats a window of rosters resolves to.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Seats {
-    by_entry: BTreeMap<(Season, Round, Car), Seat>,
+    by_entry: BTreeMap<(Round, Car), Seat>,
     ambiguities: Vec<SeatAmbiguity>,
 }
 
 impl Seats {
-    /// The seat `car` occupies at `(season, round)`.
+    /// The seat `car` occupies at `round`.
     ///
     /// `None` when the window holds no roster for that event, when the car did
     /// not enter it, or when an ambiguous diff stopped its team's lineage.
     #[must_use]
-    pub fn seat(&self, season: Season, round: Round, car: Car) -> Option<&Seat> {
-        self.by_entry.get(&(season, round, car))
+    pub fn seat(&self, round: Round, car: Car) -> Option<&Seat> {
+        self.by_entry.get(&(round, car))
     }
 
-    /// Every diff the resolver refused to guess, ordered by season, then round,
-    /// then team. One per team: the first unpairable diff stops the lineage.
+    /// Every diff the resolver refused to guess, ordered by round, then team.
+    /// One per team: the first unpairable diff stops the lineage.
     #[must_use]
     pub fn ambiguities(&self) -> &[SeatAmbiguity] {
         &self.ambiguities
     }
 }
 
-/// Resolve the seat of every car entry in a window of rosters.
+/// Resolve the seat of every car entry in one season's window of rosters.
 ///
-/// Seasons resolve independently, and the window is order
-/// independent: the rosters are indexed by season and round before any diff
-/// runs.
+/// The rosters all belong to one season. Nothing checks it: every caller holds
+/// one season by construction, so a window merging two would return a wrong
+/// answer rather than trip a guard.
+///
+/// The window is order independent: the rosters are indexed by round before any
+/// diff runs. Each team's lineage then carries across the season's events,
+/// recording every seated entry and every diff that could not be paired.
 #[must_use]
 pub fn resolve_seats(rosters: &[Roster]) -> Seats {
     let mut seats = Seats::default();
-    for (season, events) in index_window(rosters) {
-        resolve_season(season, &events, &mut seats);
+    let mut lineages: BTreeMap<Team, Lineage> = BTreeMap::new();
+
+    for (round, entries) in index_window(rosters) {
+        for (team, entered) in group_by_team(&entries) {
+            let lineage = lineages.entry(team.clone()).or_default();
+
+            match lineage.carry(&entered) {
+                Ok(seated) => {
+                    for (slot, car) in seated {
+                        let seat = Seat {
+                            team: team.clone(),
+                            slot,
+                        };
+                        seats.by_entry.insert((round, car), seat);
+                    }
+                }
+                Err(Unpaired { vacated, arriving }) => seats.ambiguities.push(SeatAmbiguity {
+                    round,
+                    team: team.clone(),
+                    vacated,
+                    arriving,
+                }),
+            }
+        }
     }
+
     seats
 }
 
 /// One event's entered cars, each mapped to the team that entered it.
 type Entries = BTreeMap<Car, Team>;
 
-/// Index the window by season and round, one team per car per event.
-fn index_window(rosters: &[Roster]) -> BTreeMap<Season, BTreeMap<Round, Entries>> {
-    let mut window: BTreeMap<Season, BTreeMap<Round, Entries>> = BTreeMap::new();
+/// Index the window by round, one team per car per event.
+fn index_window(rosters: &[Roster]) -> BTreeMap<Round, Entries> {
+    let mut window: BTreeMap<Round, Entries> = BTreeMap::new();
     for roster in rosters {
-        let event = window
-            .entry(roster.season)
-            .or_default()
-            .entry(roster.round)
-            .or_default();
+        let event = window.entry(roster.round).or_default();
         for entry in &roster.entries {
             event.entry(entry.car).or_insert_with(|| entry.team.clone());
         }
@@ -163,38 +179,6 @@ fn group_by_team(entries: &Entries) -> BTreeMap<&Team, BTreeSet<Car>> {
         teams.entry(team).or_default().insert(*car);
     }
     teams
-}
-
-/// Carry every team's lineage across one season's events, recording each seated
-/// entry and every diff that could not be paired.
-fn resolve_season(season: Season, events: &BTreeMap<Round, Entries>, seats: &mut Seats) {
-    let mut lineages: BTreeMap<Team, Lineage> = BTreeMap::new();
-
-    for (&round, entries) in events {
-        for (team, entered) in group_by_team(entries) {
-            let lineage = lineages.entry(team.clone()).or_default();
-
-            match lineage.carry(&entered) {
-                Ok(seated) => {
-                    for (slot, car) in seated {
-                        let seat = Seat {
-                            season,
-                            team: team.clone(),
-                            slot,
-                        };
-                        seats.by_entry.insert((season, round, car), seat);
-                    }
-                }
-                Err(Unpaired { vacated, arriving }) => seats.ambiguities.push(SeatAmbiguity {
-                    season,
-                    round,
-                    team: team.clone(),
-                    vacated,
-                    arriving,
-                }),
-            }
-        }
-    }
 }
 
 /// The two halves of a diff that admits more than one pairing.
@@ -326,7 +310,6 @@ mod tests {
 
     use super::*;
 
-    const SEASON: Season = 2026;
     const RED_BULL: &str = "Red Bull";
     const RACING_BULLS: &str = "Racing Bulls";
     const FERRARI: &str = "Ferrari";
@@ -340,16 +323,11 @@ mod tests {
     }
 
     fn roster(round: Round, entries: Vec<RosterEntry>) -> Roster {
-        Roster {
-            season: SEASON,
-            round,
-            entries,
-        }
+        Roster { round, entries }
     }
 
     fn seat(team: &str, slot: Slot) -> Seat {
         Seat {
-            season: SEASON,
             team: team.into(),
             slot,
         }
@@ -492,7 +470,7 @@ mod tests {
     #[test]
     fn a_teams_first_event_seats_its_lowest_car_number_in_the_first_slot() {
         assert_eq!(
-            resolve_seats(&window()).seat(SEASON, 1, 1),
+            resolve_seats(&window()).seat(1, 1),
             Some(&seat(RED_BULL, 0))
         );
     }
@@ -500,7 +478,7 @@ mod tests {
     #[test]
     fn a_teams_first_event_seats_its_higher_car_number_in_the_next_slot() {
         assert_eq!(
-            resolve_seats(&window()).seat(SEASON, 1, 30),
+            resolve_seats(&window()).seat(1, 30),
             Some(&seat(RED_BULL, 1))
         );
     }
@@ -508,7 +486,7 @@ mod tests {
     #[test]
     fn teams_slot_their_cars_independently() {
         assert_eq!(
-            resolve_seats(&window()).seat(SEASON, 1, 6),
+            resolve_seats(&window()).seat(1, 6),
             Some(&seat(RACING_BULLS, 0))
         );
     }
@@ -518,16 +496,13 @@ mod tests {
         let seats = resolve_seats(&window());
         let vacated = Some(&seat(RED_BULL, 1));
 
-        assert_eq!(
-            (seats.seat(SEASON, 2, 30), seats.seat(SEASON, 3, 22)),
-            (vacated, vacated)
-        );
+        assert_eq!((seats.seat(2, 30), seats.seat(3, 22)), (vacated, vacated));
     }
 
     #[test]
     fn the_car_moving_the_other_way_inherits_the_seat_it_arrives_in() {
         assert_eq!(
-            resolve_seats(&window()).seat(SEASON, 3, 30),
+            resolve_seats(&window()).seat(3, 30),
             Some(&seat(RACING_BULLS, 1))
         );
     }
@@ -537,10 +512,7 @@ mod tests {
         let seats = resolve_seats(&window());
         let vacated = Some(&seat(FERRARI, 1));
 
-        assert_eq!(
-            (seats.seat(SEASON, 2, 44), seats.seat(SEASON, 3, 43)),
-            (vacated, vacated)
-        );
+        assert_eq!((seats.seat(2, 44), seats.seat(3, 43)), (vacated, vacated));
     }
 
     #[test]
@@ -548,16 +520,13 @@ mod tests {
         let seats = resolve_seats(&window());
         let held = Some(&seat(FERRARI, 0));
 
-        assert_eq!(
-            (seats.seat(SEASON, 1, 16), seats.seat(SEASON, 3, 16)),
-            (held, held)
-        );
+        assert_eq!((seats.seat(1, 16), seats.seat(3, 16)), (held, held));
     }
 
     #[test]
     fn a_regular_returning_from_a_substitution_returns_to_its_seat() {
         assert_eq!(
-            resolve_seats(&substitution_and_return()).seat(SEASON, 3, 44),
+            resolve_seats(&substitution_and_return()).seat(3, 44),
             Some(&seat(FERRARI, 1))
         );
     }
@@ -570,7 +539,7 @@ mod tests {
     #[test]
     fn a_slot_keeps_its_occupant_while_its_car_sits_out_unreplaced() {
         assert_eq!(
-            resolve_seats(&one_car_entry()).seat(SEASON, 3, 30),
+            resolve_seats(&one_car_entry()).seat(3, 30),
             Some(&seat(RED_BULL, 1))
         );
     }
@@ -580,7 +549,6 @@ mod tests {
         assert_eq!(
             resolve_seats(&contested_return()).ambiguities(),
             &[SeatAmbiguity {
-                season: SEASON,
                 round: 3,
                 team: FERRARI.into(),
                 vacated: vec![0],
@@ -591,7 +559,7 @@ mod tests {
 
     #[test]
     fn a_car_returning_to_a_slot_an_entered_car_holds_takes_no_seat() {
-        assert_eq!(resolve_seats(&contested_return()).seat(SEASON, 3, 44), None);
+        assert_eq!(resolve_seats(&contested_return()).seat(3, 44), None);
     }
 
     #[test]
@@ -604,7 +572,6 @@ mod tests {
         assert_eq!(
             resolve_seats(&double_change()).ambiguities(),
             &[SeatAmbiguity {
-                season: SEASON,
                 round: 2,
                 team: RED_BULL.into(),
                 vacated: vec![0, 1],
@@ -615,12 +582,12 @@ mod tests {
 
     #[test]
     fn an_unpairable_diff_seats_neither_arriving_car() {
-        assert_eq!(resolve_seats(&double_change()).seat(SEASON, 2, 22), None);
+        assert_eq!(resolve_seats(&double_change()).seat(2, 22), None);
     }
 
     #[test]
     fn an_unpairable_diff_stops_the_team_at_every_later_event() {
-        assert_eq!(resolve_seats(&double_change()).seat(SEASON, 3, 22), None);
+        assert_eq!(resolve_seats(&double_change()).seat(3, 22), None);
     }
 
     #[test]
@@ -630,28 +597,7 @@ mod tests {
 
     #[test]
     fn a_car_the_window_never_enters_has_no_seat() {
-        assert_eq!(resolve_seats(&window()).seat(SEASON, 1, 77), None);
-    }
-
-    #[test]
-    fn seasons_resolve_independently() {
-        let seats = resolve_seats(&[
-            roster(1, vec![entry(1, "Verstappen", RED_BULL)]),
-            Roster {
-                season: SEASON + 1,
-                round: 1,
-                entries: vec![entry(30, "Lawson", RED_BULL)],
-            },
-        ]);
-
-        assert_eq!(
-            seats.seat(SEASON + 1, 1, 30),
-            Some(&Seat {
-                season: SEASON + 1,
-                team: RED_BULL.into(),
-                slot: 0,
-            })
-        );
+        assert_eq!(resolve_seats(&window()).seat(1, 77), None);
     }
 
     #[test]
@@ -664,6 +610,6 @@ mod tests {
             ],
         )]);
 
-        assert_eq!(seats.seat(SEASON, 1, 1), Some(&seat(RED_BULL, 0)));
+        assert_eq!(seats.seat(1, 1), Some(&seat(RED_BULL, 0)));
     }
 }

@@ -5,8 +5,8 @@
 //!
 //! - [`Fact`] and its [`Claim`] kinds, the verbatim record of what one document
 //!   states about one component (store raw facts, compute the view).
-//! - [`Allowances`], the per-season regulation allowances and the single rule
-//!   the domain implements, that a count above its allowance is an exceedance.
+//! - [`Allowances`], one season's regulation allowances and the single rule the
+//!   domain implements, that a count above its allowance is an exceedance.
 //! - [`resolve_seats`], which derives the [`Seat`] each car entry occupies from
 //!   a window of per-event [`Roster`]s, so a mid-season swap passes a car's
 //!   running count to the incoming driver instead of splitting it.
@@ -16,6 +16,12 @@
 //! Checking a set of facts is two steps: resolve the rosters into a seat map,
 //! then sweep the facts against it. The sweep folds by seat, so it needs the map
 //! and never builds one of its own.
+//!
+//! Every call covers one season, and no type here carries one. Counts reset each
+//! season and each season ingests and repairs on its own, so the caller holds
+//! the year and passes one season's facts and rosters. Nothing checks it: every
+//! caller holds one season by construction. [`Season`] stays exported for the
+//! crates that do key on it.
 //!
 //! The types firm up as the parsers reveal what the documents state; new claim
 //! kinds land with the parser that needs them.
