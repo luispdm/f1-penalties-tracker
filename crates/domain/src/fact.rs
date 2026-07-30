@@ -11,7 +11,7 @@ use std::fmt;
 pub type Season = u16;
 
 /// A car number.
-pub type Car = u16;
+pub type Car = u8;
 
 /// An event's ordering within a season, counting from one.
 pub type Round = u8;
@@ -21,7 +21,8 @@ pub type Round = u8;
 /// An observed string, scoped to its season. There is no
 /// cross-season team identity, so the Sauber, Alfa Romeo, and Audi renames are
 /// non-events and no mapping table exists to keep current. Within a season the
-/// name is part of the seat's identity, so it is compared, never normalised.
+/// name is part of the seat's identity, so it is compared against the names of
+/// its own source, never normalised and never matched against another source's.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Team(String);
 
@@ -170,9 +171,13 @@ pub struct Fact {
     pub superseded: bool,
     /// The team the source document prints against this car, verbatim.
     ///
-    /// A witness, not an identity. The sweep checks it against the team the
-    /// roster the document seated on entered the car for, so a page that names
-    /// the wrong team surfaces as a conflict instead of being quietly corrected.
+    /// A witness, not an identity, and never compared to a roster team: the
+    /// documents and the roster feed name teams differently. The sweep groups the
+    /// cars one document lists by the string printed against each and checks that
+    /// grouping against the roster's, so a page that puts two teams' cars under
+    /// one string surfaces as a conflict while a page that merely spells a team
+    /// differently stays silent.
+    ///
     /// `None` where the document prints no team, or where the parser reading it
     /// does not yet take one.
     pub printed_team: Option<Team>,
