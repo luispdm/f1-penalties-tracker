@@ -173,8 +173,11 @@ pub enum Conflict {
     /// the team it entered them for. A car the document prints under two strings
     /// appears under both. The cars whose grouping both sides agree on stay out.
     ///
-    /// Reported once per document, however many rows disagree. Two documents at
-    /// one event stay two witnesses, whether or not they read the same roster.
+    /// Reported once per document and roster read, however many rows disagree.
+    /// A document carrying a snapshot claim beside another kind, above the
+    /// season's first event, reads two rosters and raises a conflict against
+    /// each. Two documents at one event stay two witnesses, whether or not they
+    /// read the same roster.
     TeamGroupingMismatch {
         /// The event the document belongs to.
         document_round: Round,
@@ -323,7 +326,8 @@ fn seating_round(fact: &Fact) -> Round {
 ///
 /// The unseated dedupe key and the grouping key both name the document, so one
 /// document's several component rows fold into one conflict while two documents
-/// stay two witnesses.
+/// stay two witnesses. The grouping key names the roster read as well, so a
+/// document that reads two of them groups each on its own: see [`Reading`].
 fn seat_live_facts<'a>(facts: &'a [Fact], seats: &'a Seats) -> Seated<'a> {
     let mut timelines = Timelines::new();
     let mut conflicts = Vec::new();
@@ -628,11 +632,16 @@ mod tests {
     const RACING_BULLS: &str = "Racing Bulls";
     const FERRARI: &str = "Ferrari";
 
-    /// The same teams as the documents print them: the sponsor names the roster
-    /// feed leaves out, so no printed string equals a roster string.
+    /// The same teams as the documents print them, and the only strings the
+    /// facts here carry: the sponsor names the roster feed leaves out, so no
+    /// printed string equals a roster string.
     const RED_BULL_PRINTED: &str = "Red Bull Racing Honda RBPT";
     const RACING_BULLS_PRINTED: &str = "Racing Bulls Honda RBPT";
     const FERRARI_PRINTED: &str = "Scuderia Ferrari HP";
+
+    /// A team no roster in the window enters, for the cars the sweep cannot
+    /// seat.
+    const ALPINE_PRINTED: &str = "BWT Alpine Formula One Team";
 
     /// Every fact in the fixture is about the ICE, the component whose count the
     /// swap and the substitution carry across.
@@ -780,6 +789,20 @@ mod tests {
         )
     }
 
+    /// A new-elements row from a document that prints no team against the car.
+    fn fitted_unprinted(round: Round, car: Car) -> Fact {
+        Fact::new(
+            round,
+            car,
+            ICE,
+            Claim::ElementsFitted {
+                count: 1,
+                conformity: Conformity::InConformity,
+            },
+            NEW_ELEMENTS_DOC,
+        )
+    }
+
     fn ordinal(round: Round, car: Car, team: &str, value: u32) -> Fact {
         fact(
             round,
@@ -811,58 +834,59 @@ mod tests {
     /// holds.
     ///
     /// Each round's snapshot prints the entry list of the round before it, and
-    /// each round's new-elements document prints its own.
+    /// each round's new-elements document prints its own, both in the form the
+    /// documents print teams.
     fn clean_facts() -> Vec<Fact> {
         use Conformity::{InConformity, NotInConformity};
         vec![
             // Round 1. Nothing precedes it, so its snapshot prints its own grid.
-            snapshot(1, 30, RED_BULL, 0),
-            previously_used(1, 30, RED_BULL, 0),
-            fitted(1, 30, RED_BULL, 1, InConformity),
-            snapshot(1, 22, RACING_BULLS, 0),
-            previously_used(1, 22, RACING_BULLS, 0),
-            fitted(1, 22, RACING_BULLS, 1, InConformity),
-            snapshot(1, 44, FERRARI, 0),
-            previously_used(1, 44, FERRARI, 0),
-            fitted(1, 44, FERRARI, 1, InConformity),
-            snapshot(1, 16, FERRARI, 1),
-            previously_used(1, 16, FERRARI, 1),
-            fitted(1, 16, FERRARI, 1, InConformity),
+            snapshot(1, 30, RED_BULL_PRINTED, 0),
+            previously_used(1, 30, RED_BULL_PRINTED, 0),
+            fitted(1, 30, RED_BULL_PRINTED, 1, InConformity),
+            snapshot(1, 22, RACING_BULLS_PRINTED, 0),
+            previously_used(1, 22, RACING_BULLS_PRINTED, 0),
+            fitted(1, 22, RACING_BULLS_PRINTED, 1, InConformity),
+            snapshot(1, 44, FERRARI_PRINTED, 0),
+            previously_used(1, 44, FERRARI_PRINTED, 0),
+            fitted(1, 44, FERRARI_PRINTED, 1, InConformity),
+            snapshot(1, 16, FERRARI_PRINTED, 1),
+            previously_used(1, 16, FERRARI_PRINTED, 1),
+            fitted(1, 16, FERRARI_PRINTED, 1, InConformity),
             // Round 2. Car 22 fits nothing, so the new-elements document has no
             // row for it and its seat's total stands.
-            snapshot(2, 30, RED_BULL, 1),
-            previously_used(2, 30, RED_BULL, 1),
-            fitted(2, 30, RED_BULL, 1, InConformity),
-            snapshot(2, 22, RACING_BULLS, 1),
-            snapshot(2, 44, FERRARI, 1),
-            previously_used(2, 44, FERRARI, 1),
-            fitted(2, 44, FERRARI, 1, InConformity),
-            snapshot(2, 16, FERRARI, 2),
-            previously_used(2, 16, FERRARI, 2),
-            fitted(2, 16, FERRARI, 1, InConformity),
+            snapshot(2, 30, RED_BULL_PRINTED, 1),
+            previously_used(2, 30, RED_BULL_PRINTED, 1),
+            fitted(2, 30, RED_BULL_PRINTED, 1, InConformity),
+            snapshot(2, 22, RACING_BULLS_PRINTED, 1),
+            snapshot(2, 44, FERRARI_PRINTED, 1),
+            previously_used(2, 44, FERRARI_PRINTED, 1),
+            fitted(2, 44, FERRARI_PRINTED, 1, InConformity),
+            snapshot(2, 16, FERRARI_PRINTED, 2),
+            previously_used(2, 16, FERRARI_PRINTED, 2),
+            fitted(2, 16, FERRARI_PRINTED, 1, InConformity),
             // Round 3, where the moves take effect. The snapshot still prints
             // round 2's grid and totals; the new-elements document prints
             // round 3's grid, and each arriving car takes over the total of the
             // seat it fills.
-            snapshot(3, 30, RED_BULL, 2),
-            snapshot(3, 22, RACING_BULLS, 1),
-            snapshot(3, 44, FERRARI, 2),
-            snapshot(3, 16, FERRARI, 3),
-            previously_used(3, 22, RED_BULL, 2),
-            fitted(3, 22, RED_BULL, 1, InConformity),
-            previously_used(3, 30, RACING_BULLS, 1),
-            fitted(3, 30, RACING_BULLS, 1, InConformity),
-            previously_used(3, 43, FERRARI, 2),
-            fitted(3, 43, FERRARI, 1, InConformity),
-            previously_used(3, 16, FERRARI, 3),
-            fitted(3, 16, FERRARI, 2, NotInConformity),
-            ordinal(3, 16, FERRARI, 5),
-            penalty(3, 16, FERRARI),
+            snapshot(3, 30, RED_BULL_PRINTED, 2),
+            snapshot(3, 22, RACING_BULLS_PRINTED, 1),
+            snapshot(3, 44, FERRARI_PRINTED, 2),
+            snapshot(3, 16, FERRARI_PRINTED, 3),
+            previously_used(3, 22, RED_BULL_PRINTED, 2),
+            fitted(3, 22, RED_BULL_PRINTED, 1, InConformity),
+            previously_used(3, 30, RACING_BULLS_PRINTED, 1),
+            fitted(3, 30, RACING_BULLS_PRINTED, 1, InConformity),
+            previously_used(3, 43, FERRARI_PRINTED, 2),
+            fitted(3, 43, FERRARI_PRINTED, 1, InConformity),
+            previously_used(3, 16, FERRARI_PRINTED, 3),
+            fitted(3, 16, FERRARI_PRINTED, 2, NotInConformity),
+            ordinal(3, 16, FERRARI_PRINTED, 5),
+            penalty(3, 16, FERRARI_PRINTED),
             // Round 4. Its snapshot closes every seat's round 3 total.
-            snapshot(4, 22, RED_BULL, 3),
-            snapshot(4, 30, RACING_BULLS, 2),
-            snapshot(4, 43, FERRARI, 3),
-            snapshot(4, 16, FERRARI, 5),
+            snapshot(4, 22, RED_BULL_PRINTED, 3),
+            snapshot(4, 30, RACING_BULLS_PRINTED, 2),
+            snapshot(4, 43, FERRARI_PRINTED, 3),
+            snapshot(4, 16, FERRARI_PRINTED, 5),
         ]
     }
 
@@ -871,29 +895,6 @@ mod tests {
         facts.iter_mut().filter(move |fact| {
             fact.round == round && fact.car == car && fact.component.as_str() == ICE
         })
-    }
-
-    /// The same facts with every team string in the form the documents print,
-    /// so no string on a fact equals the roster's name for its team.
-    fn sponsored_facts() -> Vec<Fact> {
-        clean_facts()
-            .into_iter()
-            .map(|fact| Fact {
-                printed_team: fact.printed_team.as_ref().map(sponsored),
-                ..fact
-            })
-            .collect()
-    }
-
-    /// The string the documents print for a roster team.
-    fn sponsored(team: &Team) -> Team {
-        match team.as_str() {
-            RED_BULL => RED_BULL_PRINTED,
-            RACING_BULLS => RACING_BULLS_PRINTED,
-            FERRARI => FERRARI_PRINTED,
-            printed => printed,
-        }
-        .into()
     }
 
     /// Rewrite the team every row of one document prints against `car`.
@@ -916,6 +917,9 @@ mod tests {
 
     #[test]
     fn clean_facts_over_the_rosters_that_record_the_moves_report_no_conflicts() {
+        // Every string these documents print carries the sponsor names the
+        // roster feed leaves out, so not one of them equals a roster team. The
+        // grouping is the same either way.
         assert_eq!(sweep(&clean_facts(), &allowances(), &seats()), Vec::new());
     }
 
@@ -1004,18 +1008,11 @@ mod tests {
     #[test]
     fn a_seasons_first_snapshot_seats_on_its_own_roster() {
         assert_eq!(
-            sweep(&[snapshot(1, 30, RED_BULL, 0)], &allowances(), &seats()),
-            Vec::new()
-        );
-    }
-
-    #[test]
-    fn a_document_naming_teams_no_roster_uses_raises_nothing() {
-        // Every string a document prints carries the sponsor names the roster
-        // feed leaves out, so not one of them equals a roster team. The grouping
-        // is the same either way.
-        assert_eq!(
-            sweep(&sponsored_facts(), &allowances(), &seats()),
+            sweep(
+                &[snapshot(1, 30, RED_BULL_PRINTED, 0)],
+                &allowances(),
+                &seats()
+            ),
             Vec::new()
         );
     }
@@ -1054,14 +1051,14 @@ mod tests {
         // Round 3's new-elements document describes round 3, where car 22 is a
         // Red Bull entry and car 30 a Racing Bulls one. Printing 22 under Racing
         // Bulls puts the two under one string the roster splits.
-        reprint(&mut facts, 3, NEW_ELEMENTS_DOC, 22, RACING_BULLS);
+        reprint(&mut facts, 3, NEW_ELEMENTS_DOC, 22, RACING_BULLS_PRINTED);
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
             vec![Conflict::TeamGroupingMismatch {
                 document_round: 3,
                 roster_round: 3,
-                printed: grouped([(RACING_BULLS, &[22, 30])]),
+                printed: grouped([(RACING_BULLS_PRINTED, &[22, 30])]),
                 entered: grouped([(RED_BULL, &[22]), (RACING_BULLS, &[30])]),
             }]
         );
@@ -1073,14 +1070,14 @@ mod tests {
         // Round 3's snapshot describes round 2, where car 22 was still a Racing
         // Bulls entry and car 30 a Red Bull one. Printing 22 under Red Bull
         // groups it with 30, which that roster does not.
-        reprint(&mut facts, 3, SNAPSHOT_DOC, 22, RED_BULL);
+        reprint(&mut facts, 3, SNAPSHOT_DOC, 22, RED_BULL_PRINTED);
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
             vec![Conflict::TeamGroupingMismatch {
                 document_round: 3,
                 roster_round: 2,
-                printed: grouped([(RED_BULL, &[22, 30])]),
+                printed: grouped([(RED_BULL_PRINTED, &[22, 30])]),
                 entered: grouped([(RED_BULL, &[30]), (RACING_BULLS, &[22])]),
             }]
         );
@@ -1140,6 +1137,21 @@ mod tests {
     }
 
     #[test]
+    fn rows_with_no_printed_team_join_no_grouping() {
+        // Cars 30 and 22 are the pair the roster splits, and 22 prints no team,
+        // so the string left on 30 groups it with nothing. Car 16 prints none
+        // either, from a third team: gathering the two unprinted rows under one
+        // placeholder would merge teams the roster keeps apart.
+        let facts = vec![
+            fitted_component(2, 30, RED_BULL_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_unprinted(2, 22),
+            fitted_unprinted(2, 16),
+        ];
+
+        assert_eq!(sweep(&facts, &allowances(), &seats()), Vec::new());
+    }
+
+    #[test]
     fn one_documents_component_rows_are_one_conflict() {
         // One new-elements document lists each car once per component, and
         // groups the two cars alike on every row.
@@ -1167,13 +1179,13 @@ mod tests {
         // Car 30 is a Red Bull entry at rounds 1 and 2, so round 2's snapshot and
         // its new-elements document read different rosters that agree on the
         // team. Both print it in Ferrari's block, and each stays its own witness.
-        reprint(&mut facts, 2, SNAPSHOT_DOC, 30, FERRARI);
-        reprint(&mut facts, 2, NEW_ELEMENTS_DOC, 30, FERRARI);
+        reprint(&mut facts, 2, SNAPSHOT_DOC, 30, FERRARI_PRINTED);
+        reprint(&mut facts, 2, NEW_ELEMENTS_DOC, 30, FERRARI_PRINTED);
 
         let misgrouped = |roster_round| Conflict::TeamGroupingMismatch {
             document_round: 2,
             roster_round,
-            printed: grouped([(FERRARI, &[16, 30, 44])]),
+            printed: grouped([(FERRARI_PRINTED, &[16, 30, 44])]),
             entered: grouped([(RED_BULL, &[30]), (FERRARI, &[16, 44])]),
         };
 
@@ -1189,15 +1201,15 @@ mod tests {
         // Round 1 has nothing before it, so its snapshot and its new-elements
         // document both read roster 1. Both print car 30 in Ferrari's block, and
         // each stays its own witness.
-        reprint(&mut facts, 1, SNAPSHOT_DOC, 30, FERRARI);
-        reprint(&mut facts, 1, NEW_ELEMENTS_DOC, 30, FERRARI);
+        reprint(&mut facts, 1, SNAPSHOT_DOC, 30, FERRARI_PRINTED);
+        reprint(&mut facts, 1, NEW_ELEMENTS_DOC, 30, FERRARI_PRINTED);
 
         // The payload names the two rounds, not the document, so the two
         // witnesses read alike.
         let misgrouped = Conflict::TeamGroupingMismatch {
             document_round: 1,
             roster_round: 1,
-            printed: grouped([(FERRARI, &[16, 30, 44])]),
+            printed: grouped([(FERRARI_PRINTED, &[16, 30, 44])]),
             entered: grouped([(RED_BULL, &[30]), (FERRARI, &[16, 44])]),
         };
 
@@ -1282,7 +1294,7 @@ mod tests {
     #[test]
     fn a_fact_the_rosters_cannot_seat_is_a_conflict() {
         let mut facts = clean_facts();
-        facts.push(snapshot(1, 77, "Alpine", 0));
+        facts.push(snapshot(1, 77, ALPINE_PRINTED, 0));
 
         let conflicts = sweep(&facts, &allowances(), &seats());
 
@@ -1301,8 +1313,8 @@ mod tests {
         // One new-elements document lists car 77 once per component. No roster
         // enters it.
         let facts = vec![
-            fitted_component(1, 77, "Alpine", ICE, 1, Conformity::InConformity),
-            fitted_component(1, 77, "Alpine", TC, 1, Conformity::InConformity),
+            fitted_component(1, 77, ALPINE_PRINTED, ICE, 1, Conformity::InConformity),
+            fitted_component(1, 77, ALPINE_PRINTED, TC, 1, Conformity::InConformity),
         ];
 
         assert_eq!(
@@ -1320,8 +1332,8 @@ mod tests {
         // Round 1's snapshot and its new-elements document both read roster 1,
         // and neither can seat car 77.
         let facts = vec![
-            snapshot(1, 77, "Alpine", 0),
-            fitted(1, 77, "Alpine", 1, Conformity::InConformity),
+            snapshot(1, 77, ALPINE_PRINTED, 0),
+            fitted(1, 77, ALPINE_PRINTED, 1, Conformity::InConformity),
         ];
 
         let unseated = Conflict::UnknownSeat {
@@ -1341,7 +1353,10 @@ mod tests {
         // Numbers restart each event, so both snapshots print number 1. Round
         // 2's snapshot describes round 1, so both read roster 1, and neither can
         // seat car 77. Only the round tells the two documents apart.
-        let facts = vec![snapshot(1, 77, "Alpine", 0), snapshot(2, 77, "Alpine", 0)];
+        let facts = vec![
+            snapshot(1, 77, ALPINE_PRINTED, 0),
+            snapshot(2, 77, ALPINE_PRINTED, 0),
+        ];
 
         assert_eq!(
             sweep(&facts, &allowances(), &seats()),
@@ -1366,7 +1381,11 @@ mod tests {
         // roster the window does not hold.
         let short = resolve_seats(&[roster(3, swapped_grid()), roster(4, swapped_grid())]);
 
-        let conflicts = sweep(&[snapshot(3, 22, RACING_BULLS, 1)], &allowances(), &short);
+        let conflicts = sweep(
+            &[snapshot(3, 22, RACING_BULLS_PRINTED, 1)],
+            &allowances(),
+            &short,
+        );
 
         assert_eq!(
             conflicts,
@@ -1503,7 +1522,7 @@ mod tests {
         facts.push(fact(
             1,
             16,
-            FERRARI,
+            FERRARI_PRINTED,
             "GEARBOX",
             Claim::SnapshotCount(1),
             SNAPSHOT_DOC,
@@ -1524,7 +1543,7 @@ mod tests {
         let mut facts = clean_facts();
         facts.push(Fact {
             superseded: true,
-            ..snapshot(3, 30, RED_BULL, 99)
+            ..snapshot(3, 30, RED_BULL_PRINTED, 99)
         });
 
         assert_eq!(sweep(&facts, &allowances(), &seats()), Vec::new());
@@ -1535,7 +1554,7 @@ mod tests {
         let mut facts = clean_facts();
         // The identical fact, unmarked, overwrites the good snapshot and blows
         // the equations, proving the superseded skip is not a vacuous pass.
-        facts.push(snapshot(3, 30, RED_BULL, 99));
+        facts.push(snapshot(3, 30, RED_BULL_PRINTED, 99));
 
         assert!(!sweep(&facts, &allowances(), &seats()).is_empty());
     }
