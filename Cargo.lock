@@ -780,7 +780,10 @@ dependencies = [
 name = "ingest"
 version = "0.1.0"
 dependencies = [
+ "domain",
  "extract",
+ "pdf-fixtures",
+ "thiserror",
 ]
 
 [[package]]

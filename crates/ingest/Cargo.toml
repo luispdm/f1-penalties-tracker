@@ -5,7 +5,12 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+domain = { path = "../domain" }
 extract = { path = "../extract" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pdf-fixtures = { path = "../pdf-fixtures" }
 
 [lints]
 workspace = true
