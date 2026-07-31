@@ -43,16 +43,11 @@ impl ColumnLabels {
 
     /// The column holding `code`.
     #[must_use]
-    pub fn column_of(&self, code: &ComponentCode) -> Option<usize> {
+    pub fn column_of(&self, code: &str) -> Option<usize> {
         self.labelled
             .iter()
-            .find(|(_, labelled)| labelled == code)
+            .find(|(_, labelled)| labelled.as_str() == code)
             .map(|(column, _)| *column)
-    }
-
-    /// Every labelled column with its code, ascending by column.
-    pub fn iter(&self) -> impl Iterator<Item = (usize, &ComponentCode)> {
-        self.labelled.iter().map(|(column, code)| (*column, code))
     }
 
     /// How many rows at the top of the grid the header occupies. The first data
@@ -69,78 +64,193 @@ impl ColumnLabels {
 /// must come from the same document, so the codes compared are the same bytes.
 ///
 /// The header depth is not given; it is found. Each candidate depth spells a
-/// code per column, and the shallowest depth that gives every legend code
-/// exactly one column wins. A depth short of the true header leaves a split
-/// code half-spelled, `MGU` rather than `MGU-K`, and fails. A depth past it
-/// pulls a count into the label, `ICE2` rather than `ICE`, and fails too. The
-/// legend is what makes the search decidable: it says which codes must appear
-/// and how many.
+/// code per column, and the shallowest depth that accounts for the whole table
+/// wins. A depth short of the true header leaves a split code half-spelled,
+/// `MGU` rather than `MGU-K`, and fails. A depth past it pulls a count into the
+/// label, `ICE2` rather than `ICE`, and fails too. The legend is what makes the
+/// search decidable: it says which codes must appear and how many.
+///
+/// A depth accounts for the whole table when three things hold:
+///
+/// - every legend code lands on exactly one column;
+/// - every column from the leftmost labelled one rightwards carries a code, so
+///   a legend shorter than the table refuses rather than leaving a component
+///   column silently unlabelled;
+/// - no column's header is empty, which is what keeps
+///   [`ColumnLabels::header_rows`] honest. Where every code fits the top line
+///   and `N`, `Car`, and `Driver` print below it, depth 1 spells every code and
+///   leaves the identity columns blank; taking it would report a one-row header
+///   and feed the caller its second row as data.
+///
+/// The third rule refuses a table with an unheaded column. That is the trade:
+/// an unheaded column leaves the depth undecidable, and this module refuses
+/// rather than guesses.
 ///
 /// # Errors
 ///
-/// Returns [`LabelError::HeaderDoesNotMatchLegend`] when no depth labels one
-/// column per legend code.
+/// Returns [`LabelError::HeaderDoesNotMatchLegend`],
+/// [`LabelError::HeaderSpellsOneCodeTwice`],
+/// [`LabelError::HeaderColumnNotInLegend`], or
+/// [`LabelError::HeaderColumnIsBlank`], whichever the depth that came closest
+/// reports.
 pub fn label_columns(table: &Grid, legend: &Legend) -> Result<ColumnLabels, LabelError> {
+    let mut closest: Option<DepthRejection> = None;
+
     for header_rows in 1..=table.row_count() {
-        if let Some(labelled) = labels_at_depth(table, legend, header_rows) {
-            return Ok(ColumnLabels {
-                labelled,
-                header_rows,
-            });
+        match labels_at_depth(table, legend, header_rows) {
+            Ok(labelled) => {
+                return Ok(ColumnLabels {
+                    labelled,
+                    header_rows,
+                });
+            }
+            Err(rejection) => {
+                if closest
+                    .as_ref()
+                    .is_none_or(|closest| rejection.distance() < closest.distance())
+                {
+                    closest = Some(rejection);
+                }
+            }
         }
     }
 
-    Err(LabelError::HeaderDoesNotMatchLegend {
-        unmatched: unmatched_codes(table, legend),
-    })
+    // A table with no rows offers no depth to try, so no code found a column.
+    Err(closest
+        .unwrap_or_else(|| DepthRejection::MissingCodes {
+            codes: legend
+                .entries()
+                .iter()
+                .map(|entry| entry.code().to_string())
+                .collect(),
+        })
+        .into())
+}
+
+/// Why a candidate depth was rejected.
+enum DepthRejection {
+    /// Legend codes that landed on no column.
+    MissingCodes { codes: Vec<String> },
+    /// One code spelled by two columns.
+    RepeatedCode {
+        code: String,
+        first: usize,
+        second: usize,
+    },
+    /// A column whose header the legend does not declare.
+    UnknownColumn { column: usize, header: String },
+    /// A column with no header text.
+    BlankColumn { column: usize },
+}
+
+impl DepthRejection {
+    /// How far the depth fell short, closest first.
+    ///
+    /// `label_columns` keeps the closest rejection, so the refusal names the
+    /// likely fault instead of whatever the shallowest depth happened to hit.
+    /// An unknown or blank column means every code landed exactly once, so the
+    /// depth was otherwise right and its rejection says the most. A repeated
+    /// code names the spelling at fault. Missing codes name only what never
+    /// appeared, and the fewer of them, the closer the depth.
+    fn distance(&self) -> (u8, usize) {
+        match self {
+            Self::UnknownColumn { .. } | Self::BlankColumn { .. } => (0, 0),
+            Self::RepeatedCode { .. } => (1, 0),
+            Self::MissingCodes { codes } => (2, codes.len()),
+        }
+    }
+}
+
+impl From<DepthRejection> for LabelError {
+    fn from(rejection: DepthRejection) -> Self {
+        match rejection {
+            DepthRejection::MissingCodes { codes } => {
+                Self::HeaderDoesNotMatchLegend { unmatched: codes }
+            }
+            DepthRejection::RepeatedCode {
+                code,
+                first,
+                second,
+            } => Self::HeaderSpellsOneCodeTwice {
+                code,
+                first,
+                second,
+            },
+            DepthRejection::UnknownColumn { column, header } => {
+                Self::HeaderColumnNotInLegend { column, header }
+            }
+            DepthRejection::BlankColumn { column } => Self::HeaderColumnIsBlank { column },
+        }
+    }
 }
 
 /// Label the columns treating the top `header_rows` rows as the header.
 ///
-/// Returns `None` unless every legend code lands on exactly one column, which
-/// is the signal that the depth is wrong.
+/// # Errors
+///
+/// Returns the first rule of `label_columns` the depth breaks.
 fn labels_at_depth(
     table: &Grid,
     legend: &Legend,
     header_rows: usize,
-) -> Option<Vec<(usize, ComponentCode)>> {
+) -> Result<Vec<(usize, ComponentCode)>, DepthRejection> {
+    let columns = table.columns().len();
+    let headers: Vec<String> = (0..columns)
+        .map(|column| header_text(table, column, header_rows))
+        .collect();
+
     let mut column_of: Vec<Option<usize>> = vec![None; legend.entries().len()];
     let mut labelled = Vec::new();
-
-    for column in 0..table.columns().len() {
-        let Some(index) = legend.position(&header_text(table, column, header_rows)) else {
+    for (column, header) in headers.iter().enumerate() {
+        let Some(index) = legend.position(header) else {
             continue;
         };
-        if column_of[index].is_some() {
-            // Two columns spell one code. The depth is wrong, or the table is.
-            return None;
+        if let Some(first) = column_of[index] {
+            return Err(DepthRejection::RepeatedCode {
+                code: header.clone(),
+                first,
+                second: column,
+            });
         }
         column_of[index] = Some(column);
         labelled.push((column, legend.entries()[index].code().clone()));
     }
 
-    column_of.iter().all(Option::is_some).then_some(labelled)
+    let missing: Vec<String> = legend
+        .entries()
+        .iter()
+        .zip(&column_of)
+        .filter(|(_, column)| column.is_none())
+        .map(|(entry, _)| entry.code().to_string())
+        .collect();
+    if !missing.is_empty() {
+        return Err(DepthRejection::MissingCodes { codes: missing });
+    }
+
+    // Every code landed. The depth holds only if it also accounts for every
+    // column: an identity name left of the first code, a code from there on.
+    if let Some(column) = headers.iter().position(String::is_empty) {
+        return Err(DepthRejection::BlankColumn { column });
+    }
+    let mut carries_a_code = vec![false; columns];
+    for column in column_of.iter().flatten() {
+        carries_a_code[*column] = true;
+    }
+    let first_code = labelled.first().map_or(columns, |(column, _)| *column);
+    if let Some(column) = (first_code..columns).find(|column| !carries_a_code[*column]) {
+        return Err(DepthRejection::UnknownColumn {
+            column,
+            header: headers[column].clone(),
+        });
+    }
+
+    Ok(labelled)
 }
 
 /// Join a column's header cells top to bottom, which spells its code.
 fn header_text(table: &Grid, column: usize, header_rows: usize) -> String {
     (0..header_rows)
         .map(|row| table.cell(row, column).trim())
-        .collect()
-}
-
-/// The legend codes no column spells at any depth, for the error message.
-fn unmatched_codes(table: &Grid, legend: &Legend) -> Vec<String> {
-    legend
-        .entries()
-        .iter()
-        .filter(|entry| {
-            !(1..=table.row_count()).any(|header_rows| {
-                (0..table.columns().len())
-                    .any(|column| header_text(table, column, header_rows) == entry.code().as_str())
-            })
-        })
-        .map(|entry| entry.code().to_string())
         .collect()
 }
 
@@ -175,9 +285,10 @@ mod tests {
         cells.iter().map(|cell| (*cell).to_owned()).collect()
     }
 
-    /// The 2026 legend, with `sep` between the halves of the two-part codes.
-    fn legend_with(sep: char) -> Legend {
-        let grid = grid_of(&[
+    /// The 2026 legend as printed, with `sep` between the halves of the
+    /// two-part codes.
+    fn legend_rows(sep: char) -> Vec<Vec<String>> {
+        vec![
             row(&["ICE  Internal Combustion Engine", "TC  Turbo Charger"]),
             row(&["EXH  EXhaust set", "MGU-K  Motor Generator Unit Kinetic"]),
             row(&[
@@ -185,8 +296,11 @@ mod tests {
                 &format!("PU{sep}CE  Power Unit Control Electronics unit"),
             ]),
             row(&[&format!("PU{sep}ANC  Power Unit ANCillary component"), ""]),
-        ]);
-        read_legend(&grid).expect("the legend must read")
+        ]
+    }
+
+    fn legend_with(sep: char) -> Legend {
+        read_legend(&grid_of(&legend_rows(sep))).expect("the legend must read")
     }
 
     /// A 2026 table: three identity columns, seven component columns, and a
@@ -273,7 +387,7 @@ mod tests {
 
         let labels = label_columns(&table, &legend).expect("the columns must label");
 
-        assert_eq!(labels.column_of(&ComponentCode::new("PU\u{2}ANC")), Some(9));
+        assert_eq!(labels.column_of("PU\u{2}ANC"), Some(9));
     }
 
     #[test]
@@ -284,6 +398,36 @@ mod tests {
         let labels = label_columns(&table, &legend).expect("the columns must label");
 
         assert_eq!(labels.header_rows(), 3);
+    }
+
+    #[test]
+    fn counts_the_header_row_that_labels_only_the_identity_columns() {
+        let legend = legend_with('-');
+        // Every code fits the top line, so `N`, `Car`, and `Driver` print below
+        // it. Depth 1 spells all seven codes and would hand the caller the
+        // identity line as the first data row.
+        let table = grid_of(&[
+            row(&[
+                "", "", "", "ICE", "TC", "EXH", "MGU-K", "ES", "PU-CE", "PU-ANC",
+            ]),
+            row(&["N", "Car", "Driver", "", "", "", "", "", "", ""]),
+            row(&[
+                "7",
+                "Falcon Racing",
+                "Ana Ferreira",
+                "2",
+                "2",
+                "2",
+                "1",
+                "2",
+                "2",
+                "3",
+            ]),
+        ]);
+
+        let labels = label_columns(&table, &legend).expect("the columns must label");
+
+        assert_eq!(labels.header_rows(), 2);
     }
 
     #[test]
@@ -321,7 +465,46 @@ mod tests {
         let legend = read_legend(&grid).expect("the legend must read");
         let table = grid_of(&[row(&["A", "A", "B"]), row(&["1", "2", "3"])]);
 
-        assert!(label_columns(&table, &legend).is_err());
+        assert_eq!(
+            label_columns(&table, &legend),
+            Err(LabelError::HeaderSpellsOneCodeTwice {
+                code: "A".to_owned(),
+                first: 0,
+                second: 1
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_legend_shorter_than_the_table() {
+        // A legend band whose lower edge sits too high clips the last line, and
+        // the table still prints the column that line names. Labelling the
+        // other six would leave a component column silently unlabelled.
+        let rows = legend_rows('-');
+        let clipped = read_legend(&grid_of(&rows[..rows.len() - 1])).expect("the legend must read");
+        let table = wrapped_header_table('-');
+
+        assert_eq!(
+            label_columns(&table, &clipped),
+            Err(LabelError::HeaderColumnNotInLegend {
+                column: 9,
+                header: "PU-ANC".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_a_table_with_an_unheaded_column() {
+        // The price of pinning the header depth: a column the header never
+        // names is refused rather than guessed at.
+        let grid = grid_of(&[row(&["A  first", "B  second"])]);
+        let legend = read_legend(&grid).expect("the legend must read");
+        let table = grid_of(&[row(&["", "A", "B"]), row(&["7", "1", "2"])]);
+
+        assert_eq!(
+            label_columns(&table, &legend),
+            Err(LabelError::HeaderColumnIsBlank { column: 0 })
+        );
     }
 
     #[test]

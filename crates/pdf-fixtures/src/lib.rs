@@ -85,11 +85,13 @@ pub fn render_table(spec: &TableSpec) -> Vec<u8> {
 /// ordinary hyphen, so a parser matching a code against a hardcoded `"PU-CE"`
 /// reads the wrong column. U+0002 cannot be written here: [`render_table`] draws
 /// with the built-in Helvetica, whose WinAnsi encoding turns every unmappable
-/// character into `?`. U+00AD is the closest character that survives the round
-/// trip. It is invisible when rendered and it is not U+002D, so it breaks a
-/// hardcoded literal exactly as U+0002 does. The mapping is asserted against the
-/// real U+0002 in the `ingest` unit tests, which build a grid directly and need
-/// no font.
+/// character into `?`. A writer that could carry it would not help either,
+/// because pdf_oxide reads U+0002 back as U+FFFD however the file spells it.
+/// U+00AD is the closest character that survives the round trip. It is
+/// invisible when rendered and it is not U+002D, so it breaks a hardcoded
+/// literal exactly as U+0002 does. The mapping is asserted against the real
+/// U+0002 in the `ingest` unit tests, which build a grid directly and need no
+/// font.
 pub const SOFT_HYPHEN: char = '\u{ad}';
 
 /// The canonical multi-column, multi-baseline table committed as a fixture.

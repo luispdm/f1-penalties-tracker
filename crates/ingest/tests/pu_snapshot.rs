@@ -7,7 +7,7 @@
 
 use domain::ComponentCode;
 use extract::{ClusterConfig, Glyph, GlyphSource, Grid, PdfOxideEngine, cluster};
-use ingest::{Legend, label_columns, read_legend};
+use ingest::{LabelError, Legend, label_columns, read_legend};
 use pdf_fixtures::SOFT_HYPHEN;
 
 const FIXTURE: &str = concat!(
@@ -46,10 +46,23 @@ fn legend_of(glyphs: &[Glyph]) -> Legend {
 /// The codes the fixture declares, in printed order, with the separator the
 /// fixture can actually carry.
 fn expected_codes() -> Vec<String> {
-    let sh = SOFT_HYPHEN;
-    ["ICE", "TC", "EXH", "MGU-K", "ES", "PU{SH}CE", "PU{SH}ANC"]
-        .iter()
-        .map(|code| code.replace("{SH}", &sh.to_string()))
+    vec![
+        "ICE".to_owned(),
+        "TC".to_owned(),
+        "EXH".to_owned(),
+        "MGU-K".to_owned(),
+        "ES".to_owned(),
+        format!("PU{SOFT_HYPHEN}CE"),
+        format!("PU{SOFT_HYPHEN}ANC"),
+    ]
+}
+
+/// The codes a naive reader takes off the header line carrying the most of
+/// them, left to right.
+fn naive_header_line(table: &Grid, legend: &Legend) -> Vec<String> {
+    (0..table.columns().len())
+        .map(|column| table.cell(1, column).trim().to_owned())
+        .filter(|text| legend.entry(text).is_some())
         .collect()
 }
 
@@ -114,28 +127,53 @@ fn the_header_is_three_rows_deep() {
 }
 
 #[test]
-fn a_naive_header_reader_mislabels_the_column_this_mapping_gets_right() {
+fn the_wrapped_header_line_carries_only_the_short_codes() {
+    // The long codes wrapped away from the middle header line, so it reads
+    // `ICE TC EXH ES` and its fourth code is `ES`.
     let glyphs = glyphs();
     let legend = legend_of(&glyphs);
-    let table = band(&glyphs, TABLE_BAND);
-    let labels = label_columns(&table, &legend).expect("columns must label");
 
-    // The naive parser: take the header line carrying the most codes and hand
-    // the nth code to the nth component column. The fixture's middle header
-    // line reads `ICE TC EXH ES`, because the long codes wrapped away from it.
-    let naive: Vec<String> = (0..table.columns().len())
-        .map(|column| table.cell(1, column).trim().to_owned())
-        .filter(|text| legend.entry(text).is_some())
-        .collect();
-    assert_eq!(naive, ["ICE", "TC", "EXH", "ES"], "the wrapped header line");
+    let naive = naive_header_line(&band(&glyphs, TABLE_BAND), &legend);
 
-    // Its fourth code lands on the fourth component column.
-    let mislabelled = FIRST_COMPONENT_COLUMN + 3;
-    assert_eq!(naive[3], "ES");
+    assert_eq!(naive, ["ICE", "TC", "EXH", "ES"]);
+}
+
+#[test]
+fn a_naive_header_reader_mislabels_the_column_this_mapping_gets_right() {
+    // The naive parser hands the nth code of that line to the nth component
+    // column, which gives this column `ES`.
+    let glyphs = glyphs();
+    let legend = legend_of(&glyphs);
+
+    let labels = label_columns(&band(&glyphs, TABLE_BAND), &legend).expect("columns must label");
+
     assert_eq!(
-        labels.code_at(mislabelled).map(ComponentCode::as_str),
+        labels
+            .code_at(FIRST_COMPONENT_COLUMN + 3)
+            .map(ComponentCode::as_str),
         Some("MGU-K"),
         "reading down the column spells MGU then -K, so the naive label is wrong"
+    );
+}
+
+#[test]
+fn a_clipped_legend_band_refuses_rather_than_dropping_a_column() {
+    // The band that slices the legend is the caller's, derived from the page.
+    // Raising its lower edge to 448 clips the last legend line, so `PU-ANC`
+    // never reaches the legend while the table still prints its column.
+    // Labelling the remaining six and leaving the seventh unlabelled would hand
+    // the caller a plausible, wrong table.
+    let glyphs = glyphs();
+    let clipped = read_legend(&band(&glyphs, 448.0..500.0)).expect("the legend must read");
+
+    let refusal = label_columns(&band(&glyphs, TABLE_BAND), &clipped);
+
+    assert_eq!(
+        refusal,
+        Err(LabelError::HeaderColumnNotInLegend {
+            column: 9,
+            header: format!("PU{SOFT_HYPHEN}ANC"),
+        })
     );
 }
 
@@ -148,11 +186,9 @@ fn a_hardcoded_ascii_hyphen_finds_no_column() {
 
     // The fixture separates the two-part codes with U+00AD, standing in for the
     // U+0002 the 2026 documents carry. Either way a literal misses.
-    assert_eq!(labels.column_of(&ComponentCode::new("PU-CE")), None);
+    assert_eq!(labels.column_of("PU-CE"), None);
     assert!(
-        labels
-            .column_of(&ComponentCode::new(format!("PU{SOFT_HYPHEN}CE")))
-            .is_some(),
+        labels.column_of(&format!("PU{SOFT_HYPHEN}CE")).is_some(),
         "the code read from the legend must find its column"
     );
 }
