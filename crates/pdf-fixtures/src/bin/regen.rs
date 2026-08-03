@@ -14,7 +14,9 @@ use std::{
     process::ExitCode,
 };
 
-use pdf_fixtures::{TableSpec, pu_snapshot_spec, render_table, table_grid_spec};
+use pdf_fixtures::{
+    TableSpec, pu_snapshot_spec, render_table, table_grid_spec, two_band_snapshot_spec,
+};
 
 fn main() -> ExitCode {
     let dir = std::env::args().nth(1).map_or_else(
@@ -24,6 +26,7 @@ fn main() -> ExitCode {
 
     if write(&dir, "table_grid.pdf", &table_grid_spec())
         && write(&dir, "pu_snapshot.pdf", &pu_snapshot_spec())
+        && write(&dir, "two_band_snapshot.pdf", &two_band_snapshot_spec())
     {
         ExitCode::SUCCESS
     } else {

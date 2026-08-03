@@ -55,9 +55,13 @@ It carries four traps for the column mapping.
 ### The whole page has no columns
 
 Prose sits above the legend and spans the text width, so clustering the page
-collapses it to a single column. The parsers take a grid over one band of the
-page, and the caller slices it: the legend band at y 440–500, the table band at
-y 360–425.
+collapses it to a single column. The parsers take a grid over one band, and
+`ingest::bands` derives the bands from the page: the legend lands at y 447.6 to
+489.0, the table at y 364.4 to 421.9.
+
+The spacing is what bounds the legend band above. Its four lines sit 13.8 points
+apart and the prose sits 41.4 above them, so a blank line separates the two, as
+it does on the documents at 27.6 against 13.8.
 
 ### The header wraps over three baselines
 
@@ -138,4 +142,32 @@ The three header lines are not padded. Their fragments print at separately
 measured positions, which is the wrap trap above; padding across them would be
 inventing geometry that no document was measured for. The data rows carry the
 trap on their own.
+
+## `two_band_snapshot.pdf`
+
+The legend and the table of `pu_snapshot.pdf`, at the same coordinates, with the
+prose dropped and the legend's right hand block moved 20 points right, to x
+317.7. Its spec is `two_band_snapshot_spec()`.
+
+`pu_snapshot.pdf` proves that a caller must **select** the bands, since its prose
+spans the text width and collapses the page to one column. This page proves the
+other half: that a caller must **cluster each band on its own**.
+
+One legend entry is why. `PU-CE`'s description runs from x 317.7 to x 497, past
+the left edge of every component column beneath it, and the last column's ink
+opens at 498, a point away. Single linkage therefore walks it across all seven
+component boundaries, and the legend's left hand block does the same to the three
+identity columns. Measured on the fixture:
+
+| glyphs fed to `cluster` | columns out |
+|---|---|
+| both bands at once | 2 |
+| the table band alone | 10 |
+
+The real 2026 documents measure the same, where that entry runs from x 347 to x
+533 over columns starting at 309.
+
+`crates/ingest/tests/two_band_snapshot.rs` asserts both counts, so the fixture
+cannot quietly stop carrying the trap, and reads the legend and the column
+labels off the two bands.
 

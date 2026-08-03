@@ -181,6 +181,19 @@ fn legend_line(code: &str, description: &str) -> String {
     format!("{code}{}{description}", " ".repeat(padding))
 }
 
+/// Font size of the snapshot pages, in points, as the documents print them.
+const SNAPSHOT_FONT_SIZE_PT: f32 = 9.0;
+
+/// Left edge of the legend's left hand block, in points.
+const LEGEND_LEFT_X: f32 = 42.5;
+
+/// Baselines of the legend's four lines, top to bottom.
+///
+/// They sit 13.8 points apart, and the line above them sits 27.6 away on the
+/// real documents. That blank line is what bounds the legend band above, so the
+/// spacing is part of what the fixtures test.
+const LEGEND_Y: [f32; 4] = [489.0, 475.2, 461.4, 447.6];
+
 /// A snapshot page shaped like the 2026 `PU elements used per driver up to now`
 /// documents, with invented drivers and teams.
 ///
@@ -210,7 +223,111 @@ fn legend_line(code: &str, description: &str) -> String {
 /// appear at all.
 #[must_use]
 pub fn pu_snapshot_spec() -> TableSpec {
-    const FONT_SIZE_PT: f32 = 9.0;
+    // The legend's right hand block, at the position measured on the documents.
+    const LEGEND_RIGHT_X: f32 = 297.7;
+
+    let mut cells = vec![
+        // Prose. The first line spans the text width and bridges every column.
+        CellSpec::new("2027 SYNTHETIC GRAND PRIX", 173.5, 696.3),
+        CellSpec::new(
+            "The drivers entered in this synthetic championship have used the number of power unit elements listed below so far:",
+            LEGEND_LEFT_X,
+            530.4,
+        ),
+    ];
+    cells.extend(legend_cells(LEGEND_RIGHT_X));
+    cells.extend(table_cells());
+
+    TableSpec {
+        page_width_mm: 210.0,
+        page_height_mm: 297.0,
+        font_size_pt: SNAPSHOT_FONT_SIZE_PT,
+        cells,
+    }
+}
+
+/// The same snapshot page carrying its legend band and its table band alone.
+///
+/// [`pu_snapshot_spec`] proves that a caller must *select* the bands, since its
+/// prose spans the text width and collapses the whole page to one column. This
+/// page proves the other half: that a caller must *cluster* each band on its
+/// own. Select both bands together, cluster once, and the table still does not
+/// appear.
+///
+/// The reason is one wide legend entry. `PU-CE`'s description runs from x 317.7
+/// to x 497, past the left edge of every component column beneath it and within
+/// a point of the last one's ink, so single-linkage clustering steps across all
+/// seven boundaries. Both bands together therefore yield **2** columns against
+/// the table's **10**, which is what the real 2026 documents measure, where the
+/// same entry runs from x 347 to x 533.
+///
+/// The table is the one [`pu_snapshot_spec`] prints, padding and wrapped header
+/// included, at the same coordinates.
+#[must_use]
+pub fn two_band_snapshot_spec() -> TableSpec {
+    // The legend's right hand block, 20 points right of where
+    // `pu_snapshot_spec` puts it. That is what carries its widest entry across
+    // the last component column, and it sits nearer the real documents, which
+    // print the block's description from x 347.
+    const LEGEND_RIGHT_X: f32 = 317.7;
+
+    let mut cells = legend_cells(LEGEND_RIGHT_X);
+    cells.extend(table_cells());
+
+    TableSpec {
+        page_width_mm: 210.0,
+        page_height_mm: 297.0,
+        font_size_pt: SNAPSHOT_FONT_SIZE_PT,
+        cells,
+    }
+}
+
+/// The legend block: two entries a line, the right hand one starting at
+/// `right_x`.
+///
+/// The 2026 component set, whose two-part codes carry [`SOFT_HYPHEN`].
+fn legend_cells(right_x: f32) -> Vec<CellSpec> {
+    let sh = SOFT_HYPHEN;
+    let pu_ce = format!("PU{sh}CE");
+    let pu_anc = format!("PU{sh}ANC");
+
+    vec![
+        CellSpec::new(
+            &legend_line("ICE", "Internal Combustion Engine"),
+            LEGEND_LEFT_X,
+            LEGEND_Y[0],
+        ),
+        CellSpec::new(&legend_line("TC", "Turbo Charger"), right_x, LEGEND_Y[0]),
+        CellSpec::new(
+            &legend_line("EXH", "EXhaust set"),
+            LEGEND_LEFT_X,
+            LEGEND_Y[1],
+        ),
+        CellSpec::new(
+            &legend_line("MGU-K", "Motor Generator Unit Kinetic"),
+            right_x,
+            LEGEND_Y[1],
+        ),
+        CellSpec::new(
+            &legend_line("ES", "Energy Store unit"),
+            LEGEND_LEFT_X,
+            LEGEND_Y[2],
+        ),
+        CellSpec::new(
+            &legend_line(&pu_ce, "Power Unit Control Electronics unit"),
+            right_x,
+            LEGEND_Y[2],
+        ),
+        CellSpec::new(
+            &legend_line(&pu_anc, "Power Unit ANCillary component"),
+            LEGEND_LEFT_X,
+            LEGEND_Y[3],
+        ),
+    ]
+}
+
+/// The table block: the wrapped header over four padded data rows.
+fn table_cells() -> Vec<CellSpec> {
     // Padding before each data cell but the row's first, in spaces. Each count
     // is the longest run that still opens clear of the column to its left,
     // measured from the rendered fixture: the runs start between 0.3 and 2.4
@@ -221,12 +338,6 @@ pub fn pu_snapshot_spec() -> TableSpec {
     const COUNT_PAD: [u16; 7] = [17, 7, 9, 9, 7, 8, 8];
 
     let sh = SOFT_HYPHEN;
-    let pu_ce = format!("PU{sh}CE");
-    let pu_anc = format!("PU{sh}ANC");
-
-    // Legend: two entries per line, left block and right block.
-    let (legend_left_x, legend_right_x) = (42.5, 297.7);
-    let legend_y = [489.0, 475.2, 461.4, 447.6];
 
     // Header: three baselines, 5.76 points apart. The gap clears the row
     // clustering threshold, so each is its own grid row.
@@ -266,49 +377,6 @@ pub fn pu_snapshot_spec() -> TableSpec {
     ];
 
     let mut cells = vec![
-        // Prose. The first line spans the text width and bridges every column.
-        CellSpec::new("2027 SYNTHETIC GRAND PRIX", 173.5, 696.3),
-        CellSpec::new(
-            "The drivers entered in this synthetic championship have used the number of power unit elements listed below so far:",
-            42.5,
-            530.4,
-        ),
-        // Legend.
-        CellSpec::new(
-            &legend_line("ICE", "Internal Combustion Engine"),
-            legend_left_x,
-            legend_y[0],
-        ),
-        CellSpec::new(
-            &legend_line("TC", "Turbo Charger"),
-            legend_right_x,
-            legend_y[0],
-        ),
-        CellSpec::new(
-            &legend_line("EXH", "EXhaust set"),
-            legend_left_x,
-            legend_y[1],
-        ),
-        CellSpec::new(
-            &legend_line("MGU-K", "Motor Generator Unit Kinetic"),
-            legend_right_x,
-            legend_y[1],
-        ),
-        CellSpec::new(
-            &legend_line("ES", "Energy Store unit"),
-            legend_left_x,
-            legend_y[2],
-        ),
-        CellSpec::new(
-            &legend_line(&pu_ce, "Power Unit Control Electronics unit"),
-            legend_right_x,
-            legend_y[2],
-        ),
-        CellSpec::new(
-            &legend_line(&pu_anc, "Power Unit ANCillary component"),
-            legend_left_x,
-            legend_y[3],
-        ),
         // Header, top line: the upper half of each split code.
         CellSpec::new("MGU", 393.7, header_top_y),
         CellSpec::new(&format!("PU{sh}"), 459.2, header_top_y),
@@ -337,11 +405,5 @@ pub fn pu_snapshot_spec() -> TableSpec {
             cells.push(CellSpec::padded(count, x, y, pad));
         }
     }
-
-    TableSpec {
-        page_width_mm: 210.0,
-        page_height_mm: 297.0,
-        font_size_pt: FONT_SIZE_PT,
-        cells,
-    }
+    cells
 }
