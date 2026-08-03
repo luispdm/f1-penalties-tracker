@@ -24,19 +24,32 @@ const TABLE_BAND: std::ops::Range<f32> = 360.0..425.0;
 // component.
 const FIRST_COMPONENT_COLUMN: usize = 3;
 
+// The header is three rows deep, so the first data row is the fourth.
+const FIRST_DATA_ROW: usize = 3;
+
+// The left edge of each table column, in points, as the fixture prints it.
+// Padding must not move them: the point of deriving boundaries from ink is that
+// the spaces between the columns leave the columns where they are.
+const COLUMN_X0: [f32; 10] = [
+    47.9, 74.0, 211.0, 303.5, 333.5, 360.7, 393.7, 430.6, 459.2, 489.6,
+];
+
 fn glyphs() -> Vec<Glyph> {
     let bytes = std::fs::read(FIXTURE).expect("committed fixture must exist");
     let engine = PdfOxideEngine::from_bytes(bytes).expect("fixture must parse");
     engine.glyphs(0).expect("page 0 must extract")
 }
 
-fn band(glyphs: &[Glyph], band: std::ops::Range<f32>) -> Grid {
-    let sliced: Vec<Glyph> = glyphs
+fn band_glyphs(glyphs: &[Glyph], band: std::ops::Range<f32>) -> Vec<Glyph> {
+    glyphs
         .iter()
         .copied()
         .filter(|glyph| band.contains(&glyph.y))
-        .collect();
-    cluster(&sliced, &ClusterConfig::default())
+        .collect()
+}
+
+fn band(glyphs: &[Glyph], band: std::ops::Range<f32>) -> Grid {
+    cluster(&band_glyphs(glyphs, band), &ClusterConfig::default())
 }
 
 fn legend_of(glyphs: &[Glyph]) -> Legend {
@@ -75,6 +88,52 @@ fn clustering_the_whole_page_gives_one_column() {
     let grid = cluster(&glyphs(), &ClusterConfig::default());
 
     assert_eq!(grid.columns().len(), 1);
+}
+
+#[test]
+fn the_table_band_clusters_into_its_ten_documented_columns() {
+    let table = band(&glyphs(), TABLE_BAND);
+
+    let found: Vec<f32> = table.columns().iter().map(|column| column.x0).collect();
+    assert_eq!(found.len(), COLUMN_X0.len(), "columns: {found:?}");
+    for (found, printed) in found.iter().zip(COLUMN_X0) {
+        assert!(
+            (found - printed).abs() < 0.01,
+            "column {printed} moved to {found}",
+        );
+    }
+}
+
+#[test]
+fn the_padded_table_band_carries_the_whitespace_trap() {
+    // The fixture proves the rule only while its rows are padded. Cluster the
+    // band's midpoints with the space glyphs left in and single linkage walks
+    // the padding across every boundary, which is what the boundaries derived
+    // from ink alone avoid. Drop the padding and the fixture passes either way.
+    let mut midpoints: Vec<f32> = band_glyphs(&glyphs(), TABLE_BAND)
+        .iter()
+        .map(|glyph| glyph.mid_x())
+        .collect();
+    midpoints.sort_by(f32::total_cmp);
+
+    let columns = 1 + midpoints
+        .windows(2)
+        .filter(|pair| pair[1] - pair[0] > ClusterConfig::default().column_gap)
+        .count();
+
+    assert_eq!(
+        columns, 1,
+        "the padding must bridge every column, or the fixture proves nothing"
+    );
+}
+
+#[test]
+fn multi_word_cells_keep_their_space_and_pick_up_no_padding() {
+    let table = band(&glyphs(), TABLE_BAND);
+
+    assert_eq!(table.cell(FIRST_DATA_ROW, 1), "Falcon Racing");
+    assert_eq!(table.cell(FIRST_DATA_ROW, 2), "Ana Ferreira");
+    assert_eq!(table.cell(FIRST_DATA_ROW + 3, 1), "Vertex Motors");
 }
 
 #[test]
@@ -163,6 +222,13 @@ fn a_clipped_legend_band_refuses_rather_than_dropping_a_column() {
     // never reaches the legend while the table still prints its column.
     // Labelling the remaining six and leaving the seventh unlabelled would hand
     // the caller a plausible, wrong table.
+    //
+    // The clip also splits the legend's codes from their descriptions. `PU-ANC`
+    // is the longest code in the band and the only one reaching past where the
+    // descriptions start, so cutting its line leaves nothing to bridge the two,
+    // and boundaries drawn from ink put the code in one column and the
+    // description in the next. `read_legend` rejoins them, which is why the
+    // refusal below still comes from the labelling and not from the legend.
     let glyphs = glyphs();
     let clipped = read_legend(&band(&glyphs, 448.0..500.0)).expect("the legend must read");
 

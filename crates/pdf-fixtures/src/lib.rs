@@ -34,7 +34,29 @@ impl CellSpec {
             baseline_pt,
         }
     }
+
+    /// A cell whose text still starts at `x_pt`, preceded by `spaces` spaces.
+    ///
+    /// The padding is drawn in the same run and the origin moves left by exactly
+    /// its advance, so the text's left edge does not move. That is what lets a
+    /// fixture carry the inter-cell space glyphs a real document prints while
+    /// keeping every column at the position measured on that document.
+    #[must_use]
+    pub fn padded(text: &str, x_pt: f32, baseline_pt: f32, spaces: u16, font_size_pt: f32) -> Self {
+        Self {
+            text: format!("{}{text}", " ".repeat(usize::from(spaces))),
+            x_pt: x_pt - f32::from(spaces) * HELVETICA_SPACE_EM * font_size_pt,
+            baseline_pt,
+        }
+    }
 }
+
+/// The advance of a space in the built-in Helvetica, in ems.
+///
+/// [`render_table`] draws with that font, whose space is 278/1000 em wide. The
+/// advance is exact, so [`CellSpec::padded`] can move an origin back by a whole
+/// number of spaces and land the text on the same point it started from.
+const HELVETICA_SPACE_EM: f32 = 0.278;
 
 /// A page of independently placed text cells to render as a PDF.
 #[derive(Debug, Clone)]
@@ -162,12 +184,29 @@ fn legend_line(code: &str, description: &str) -> String {
 /// **The two-part codes use [`SOFT_HYPHEN`], not U+002D**, so matching a header
 /// against a hardcoded `"PU-CE"` finds nothing.
 ///
+/// **The data rows are padded.** A real snapshot draws a row as one run of text
+/// whose cells are spaced apart, so a space glyph sits in every gap between
+/// columns and a clustering that reads whitespace midpoints walks the padding
+/// from one column to the next until ten columns come out as one. The padding
+/// here is drawn by [`CellSpec::padded`], which leaves every column's left edge
+/// on the point measured from the documents.
+///
 /// The page also carries prose above the legend, as the real ones do. It spans
 /// the full text width, so clustering the whole page collapses it to a single
 /// column: a caller must slice the page into bands before the table's columns
 /// appear at all.
 #[must_use]
 pub fn pu_snapshot_spec() -> TableSpec {
+    const FONT_SIZE_PT: f32 = 9.0;
+    // Padding before each data cell but the row's first, in spaces. Each count
+    // is the longest run that still opens clear of the column to its left,
+    // measured from the rendered fixture: the runs start between 0.3 and 2.4
+    // points past that column's ink, far inside the 12-point column gap, so
+    // whitespace midpoints chain every boundary. Inked midpoints do not move.
+    const TEAM_PAD: u16 = 7;
+    const DRIVER_PAD: u16 = 31;
+    const COUNT_PAD: [u16; 7] = [17, 7, 9, 9, 7, 8, 8];
+
     let sh = SOFT_HYPHEN;
     let pu_ce = format!("PU{sh}CE");
     let pu_anc = format!("PU{sh}ANC");
@@ -279,17 +318,23 @@ pub fn pu_snapshot_spec() -> TableSpec {
     let count_x = [ice_x, tc_x, exh_x, mgu_k_x, es_x, pu_ce_x, pu_anc_x];
     for (y, (no, team, driver, counts)) in data_y.into_iter().zip(rows) {
         cells.push(CellSpec::new(no, no_x, y));
-        cells.push(CellSpec::new(team, team_x, y));
-        cells.push(CellSpec::new(driver, driver_x, y));
-        for (x, count) in count_x.into_iter().zip(counts) {
-            cells.push(CellSpec::new(count, x, y));
+        cells.push(CellSpec::padded(team, team_x, y, TEAM_PAD, FONT_SIZE_PT));
+        cells.push(CellSpec::padded(
+            driver,
+            driver_x,
+            y,
+            DRIVER_PAD,
+            FONT_SIZE_PT,
+        ));
+        for ((x, pad), count) in count_x.into_iter().zip(COUNT_PAD).zip(counts) {
+            cells.push(CellSpec::padded(count, x, y, pad, FONT_SIZE_PT));
         }
     }
 
     TableSpec {
         page_width_mm: 210.0,
         page_height_mm: 297.0,
-        font_size_pt: 9.0,
+        font_size_pt: FONT_SIZE_PT,
         cells,
     }
 }
