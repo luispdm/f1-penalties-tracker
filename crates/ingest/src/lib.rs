@@ -13,15 +13,21 @@
 //! - [`label_columns`], which gives each component column its code by reading
 //!   down the column rather than along the wrapped header line.
 //!
-//! Both take a grid covering one band of the page. Clustering a whole page
-//! yields a single column, because the prose and the legend descriptions run
-//! across it without a gap wide enough to split, so the caller slices the page
-//! into bands before either call.
+//! - [`bands`], which slices a page into those two regions and clusters each on
+//!   its own.
+//!
+//! Both parsers take a grid covering one band of the page. Clustering a whole
+//! page yields a single column, because the prose and the legend descriptions
+//! run across it without a gap wide enough to split, and clustering the two
+//! bands together yields two, because a legend description spans the columns
+//! beneath it. So [`bands`] slices the page and clusters each band apart.
 
+mod bands;
 mod error;
 mod labels;
 mod legend;
 
-pub use error::LabelError;
+pub use bands::{Bands, bands};
+pub use error::{BandError, LabelError};
 pub use labels::{ColumnLabels, label_columns};
 pub use legend::{Legend, LegendEntry, read_legend};

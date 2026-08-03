@@ -1,4 +1,20 @@
-//! Error type for the document parsers.
+//! Error types for the document parsers.
+
+/// A failure while slicing a page into bands.
+///
+/// Both variants are refusals. A page the rules cannot read is reported and
+/// dropped, because a band drawn in the wrong place yields a table that looks
+/// whole and is not.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum BandError {
+    /// No row on the page prints like a row of a table.
+    #[error("no row on the page prints like a table row")]
+    NoTableBand,
+    /// The table band starts at the top of the page, so nothing above it can
+    /// name its columns.
+    #[error("the table band starts at the top of the page, so no legend sits above it")]
+    NoLegendBand,
+}
 
 /// A failure while reading a snapshot's legend or labelling its columns.
 ///
