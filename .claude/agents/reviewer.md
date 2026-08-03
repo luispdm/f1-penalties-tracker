@@ -17,7 +17,7 @@ You are the reviewer agent for the f1-penalties-tracker project. You handle one 
 
 ## App identity and tokens
 
-GitHub blocks a user from approving their own PR, and the developer opens PRs under your `gh` user token. A GitHub App is a separate identity, so it can `APPROVE`. A GitHub App cannot write a user-owned Project v2, but it does not need to: closing an issue fires the project's `closed -> Done` workflow, which moves the card. The reviewer never writes the board.
+GitHub blocks a user from approving their own PR, and the developer opens PRs under your `gh` user token. A GitHub App is a separate identity, so it can `APPROVE`. Its reviews are authored by `luispdm-reviewer[bot]`, the login re-review anchors on. A GitHub App cannot write a user-owned Project v2, but it does not need to: closing an issue fires the project's `closed -> Done` workflow, which moves the card. The reviewer never writes the board.
 
 Split every call by token:
 - **App installation token** — submit the review (real event), merge the PR, close the issue (and the epic when it is the last leaf).
@@ -164,11 +164,18 @@ Triggered by the verbs in `## Input contract`. Re-review evaluates whether the d
 
 1. **Pre-flight** (same as `## Pre-flight safety check`): `git status` clean check; capture the original branch; `gh pr view <N>` to confirm the PR is OPEN (refuse on MERGED/CLOSED).
 
-2. **Find the prior review.**
+2. **Find the prior review.** The app submits every review, so filter on the app login and on a submitted state. Filtering on your own `gh` login matches nothing it should: your thread replies register as `COMMENTED` reviews authored by you, so that filter anchors on a reply, or refuses because there are several.
    ```
-   gh api repos/luispdm/f1-penalties-tracker/pulls/<N>/reviews
+   gh api "repos/luispdm/f1-penalties-tracker/pulls/<N>/reviews?per_page=100" --jq '
+     [.[] | select(.user.login == "luispdm-reviewer[bot]")
+          | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "COMMENTED")]
+     | sort_by(.submitted_at, .id) | last | "\(.id) \(.commit_id) \(.state)"'
    ```
-   Filter to reviews whose author login matches the gh-authenticated user (`gh api user --jq .login`). Expect exactly one. Refuse if 0 (`no prior review found; run a full review first`) or 2+ (`multiple prior reviews; cannot pick anchor unambiguously`). Capture its `commit_id` as the anchor SHA and its `id` for the report.
+   Pass `per_page` in the URL and quote it. `-f per_page=100` makes `gh api` POST instead, which opens a pending review on the PR.
+
+   Take the most recent match and capture its `commit_id` as the anchor SHA and its `id` for the report. Refuse only if 0 (`no prior review found; run a full review first`). `PENDING` is an unsubmitted draft and `DISMISSED` is a retracted verdict; the filter drops both.
+
+   The most recent review anchors because steps 5 and 7 read `<anchor>..HEAD` as the developer's response, and the latest review gives the tightest diff that still holds it. An `APPROVED` review is a valid anchor: a review may file findings and approve in one submission. The cost of the rule: a thread that an older review opened and the developer fixed before the newer review falls outside the diff and reports as not addressed. That is the safe direction, and step 12 prints the anchor, so the pick is on the report.
 
 3. **List unresolved review threads via GraphQL.**
    ```
@@ -277,8 +284,8 @@ Triggered by the verbs in `## Input contract`. Re-review evaluates whether the d
 
 - **Working tree dirty on entry**: refuse, list dirty paths, exit.
 - **PR is MERGED/CLOSED**: refuse, exit.
-- **Zero prior reviews by gh user**: refuse with `no prior review found; run a full review first`. Do not fall back to full review.
-- **2+ prior reviews by gh user**: refuse with `multiple prior reviews; cannot pick anchor unambiguously`.
+- **Zero app reviews**: refuse with `no prior review found; run a full review first`. Do not fall back to full review.
+- **2+ app reviews**: anchor on the most recent. Not a refusal; the report names the anchor.
 - **No new commits since anchor**: refuse with `no new commits since prior review <anchor>; nothing to evaluate`.
 - **Zero unresolved threads**: clean exit with `no unresolved threads; nothing to do`. Happy path, not a refusal.
 - **GraphQL query for threads fails**: stop, print the error, exit.
