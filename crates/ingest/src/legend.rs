@@ -80,27 +80,49 @@ impl Legend {
 /// padding binds the pair into a single cell even where a row carries two
 /// entries side by side.
 ///
+/// A cell holding a bare code is rejoined with the cell to its right. The
+/// clustering derives its columns from inked glyphs, so an entry's padding can
+/// exceed the column gap and put the code in one column and the description in
+/// the next. Whether it does turns on the longest code in the band: a code that
+/// reaches past where the descriptions start bridges the two, and one that falls
+/// short leaves them apart. The legend reads the same either way.
+///
+/// The rejoin is guarded, so one entry never swallows another's code. See
+/// [`reads_as_a_description`].
+///
 /// # Errors
 ///
 /// Returns [`LabelError::EmptyLegend`] when no cell holds an entry,
-/// [`LabelError::LegendEntryWithoutDescription`] when a cell holds a bare code,
-/// and [`LabelError::DuplicateLegendCode`] when one code appears twice.
+/// [`LabelError::LegendEntryWithoutDescription`] when a bare code has no
+/// description beside it, and [`LabelError::DuplicateLegendCode`] when one code
+/// appears twice.
 pub fn read_legend(grid: &Grid) -> Result<Legend, LabelError> {
     let mut entries: Vec<LegendEntry> = Vec::new();
 
     for row in 0..grid.row_count() {
-        for column in 0..grid.columns().len() {
+        let mut column = 0;
+        while column < grid.columns().len() {
             let cell = grid.cell(row, column).trim();
+            column += 1;
             if cell.is_empty() {
                 continue;
             }
 
-            let Some((code, description)) = cell.split_once(char::is_whitespace) else {
-                return Err(LabelError::LegendEntryWithoutDescription {
-                    entry: cell.to_owned(),
-                });
+            let (code, description) = match cell.split_once(char::is_whitespace) {
+                Some((code, description)) => (code, description.trim()),
+                // A bare code: take the cell to its right as the description,
+                // but only where that cell prints no code of its own.
+                None => {
+                    let neighbour = grid.cell(row, column).trim();
+                    if !reads_as_a_description(neighbour) {
+                        return Err(LabelError::LegendEntryWithoutDescription {
+                            entry: cell.to_owned(),
+                        });
+                    }
+                    column += 1;
+                    (cell, neighbour)
+                }
             };
-            let description = description.trim();
             if description.is_empty() {
                 return Err(LabelError::LegendEntryWithoutDescription {
                     entry: cell.to_owned(),
@@ -123,6 +145,25 @@ pub fn read_legend(grid: &Grid) -> Result<Legend, LabelError> {
         return Err(LabelError::EmptyLegend);
     }
     Ok(Legend { entries })
+}
+
+/// Whether a cell reads as a description on its own, rather than as an entry
+/// carrying its own code.
+///
+/// The page separates the two. An entry pads its code out to the description's
+/// column, so its first whitespace is a run of several. A description is prose,
+/// so its first whitespace is one space. `Internal Combustion Engine` is a
+/// description; `TC       Turbo Charger` is an entry.
+///
+/// A cell with no whitespace at all fails this, and so does an empty one. A bare
+/// token could be either a one-word description or a code, and pairing a code
+/// with the code beside it would invent an entry and lose one. Refusing says so.
+fn reads_as_a_description(cell: &str) -> bool {
+    let after_first_token = cell.trim_start_matches(|ch: char| !ch.is_whitespace());
+    let mut whitespace = after_first_token
+        .chars()
+        .take_while(|ch| ch.is_whitespace());
+    whitespace.next().is_some() && whitespace.next().is_none()
 }
 
 #[cfg(test)]
@@ -225,6 +266,66 @@ mod tests {
     #[test]
     fn rejects_a_code_with_no_description() {
         let grid = grid_of(&[&["ICE"]]);
+
+        assert_eq!(
+            read_legend(&grid),
+            Err(LabelError::LegendEntryWithoutDescription {
+                entry: "ICE".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejoins_a_code_the_column_boundaries_split_from_its_description() {
+        // Boundaries come from inked glyphs, so an entry's padding can exceed
+        // the column gap and leave the code in one column and the description in
+        // the next. The pair still reads as one entry.
+        let grid = grid_of(&[
+            &[
+                "ICE",
+                "Internal Combustion Engine",
+                "TC       Turbo Charger",
+            ],
+            &["ES", "Energy Store unit", ""],
+        ]);
+
+        let legend = read_legend(&grid).expect("the legend must read");
+
+        let entries: Vec<(&str, &str)> = legend
+            .entries()
+            .iter()
+            .map(|entry| (entry.code().as_str(), entry.description()))
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("ICE", "Internal Combustion Engine"),
+                ("TC", "Turbo Charger"),
+                ("ES", "Energy Store unit"),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_to_rejoin_a_code_with_a_cell_that_carries_its_own() {
+        // The guard. `TC       Turbo Charger` pads a code out to a description,
+        // so it is an entry, not a description. Rejoining would give `ICE` the
+        // whole of it and lose `TC`.
+        let grid = grid_of(&[&["ICE", "TC       Turbo Charger"]]);
+
+        assert_eq!(
+            read_legend(&grid),
+            Err(LabelError::LegendEntryWithoutDescription {
+                entry: "ICE".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_to_rejoin_two_bare_codes() {
+        // A lone token could be a one-word description or a code. Pairing them
+        // would invent an entry and lose one.
+        let grid = grid_of(&[&["ICE", "TC"]]);
 
         assert_eq!(
             read_legend(&grid),
