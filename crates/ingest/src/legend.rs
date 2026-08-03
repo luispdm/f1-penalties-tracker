@@ -80,27 +80,56 @@ impl Legend {
 /// padding binds the pair into a single cell even where a row carries two
 /// entries side by side.
 ///
+/// A cell holding a bare code is rejoined with the cell to its right. The
+/// clustering derives its columns from inked glyphs, so an entry's padding can
+/// exceed the column gap and put the code in one column and the description in
+/// the next. Whether it does turns on the longest code in the band: a code that
+/// reaches past where the descriptions start bridges the two, and one that falls
+/// short leaves them apart. The legend reads the same either way.
+///
+/// The rejoin is guarded by [`ColumnKind`], so one entry never swallows
+/// another's code: the column to the right has to hold descriptions and nothing
+/// else. Anything else refuses.
+///
 /// # Errors
 ///
 /// Returns [`LabelError::EmptyLegend`] when no cell holds an entry,
-/// [`LabelError::LegendEntryWithoutDescription`] when a cell holds a bare code,
-/// and [`LabelError::DuplicateLegendCode`] when one code appears twice.
+/// [`LabelError::LegendEntryWithoutDescription`] when a bare code has no
+/// description beside it, and [`LabelError::DuplicateLegendCode`] when one code
+/// appears twice.
 pub fn read_legend(grid: &Grid) -> Result<Legend, LabelError> {
+    let kinds: Vec<ColumnKind> = (0..grid.columns().len())
+        .map(|column| ColumnKind::of(grid, column))
+        .collect();
     let mut entries: Vec<LegendEntry> = Vec::new();
 
     for row in 0..grid.row_count() {
-        for column in 0..grid.columns().len() {
+        let mut column = 0;
+        while column < grid.columns().len() {
             let cell = grid.cell(row, column).trim();
+            // Where a rejoined description would come from.
+            let neighbour = column + 1;
+            column = neighbour;
             if cell.is_empty() {
                 continue;
             }
 
-            let Some((code, description)) = cell.split_once(char::is_whitespace) else {
-                return Err(LabelError::LegendEntryWithoutDescription {
-                    entry: cell.to_owned(),
-                });
+            let (code, description) = match cell.split_once(char::is_whitespace) {
+                Some((code, description)) => (code, description.trim()),
+                // A bare code: the column boundaries split it from its
+                // description, so take the column to its right. That column has
+                // to hold descriptions alone, or this would swallow the code of
+                // the entry beside it.
+                None => {
+                    if kinds.get(neighbour) != Some(&ColumnKind::Descriptions) {
+                        return Err(LabelError::LegendEntryWithoutDescription {
+                            entry: cell.to_owned(),
+                        });
+                    }
+                    column = neighbour + 1;
+                    (cell, grid.cell(row, neighbour).trim())
+                }
             };
-            let description = description.trim();
             if description.is_empty() {
                 return Err(LabelError::LegendEntryWithoutDescription {
                     entry: cell.to_owned(),
@@ -123,6 +152,78 @@ pub fn read_legend(grid: &Grid) -> Result<Legend, LabelError> {
         return Err(LabelError::EmptyLegend);
     }
     Ok(Legend { entries })
+}
+
+/// What a column of a legend band holds.
+///
+/// The column boundaries are the clustering's, and a cut is global to the grid:
+/// a pair of columns splits for every entry it holds or for none. So the
+/// question of what a cell is belongs to its column, and reading the column
+/// answers it from every cell at once rather than from the one in hand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColumnKind {
+    /// Codes the boundaries cut away from their descriptions, or an empty
+    /// column. Every cell is a lone token.
+    Codes,
+    /// Whole entries, each padding its own code out to a description.
+    Entries,
+    /// Descriptions cut from the codes in the column to the left.
+    Descriptions,
+}
+
+impl ColumnKind {
+    /// Read a column's kind off its non-empty cells.
+    ///
+    /// Padding is what tells an entry from a description. An entry pads its code
+    /// out to a column, so somewhere in it sits a run of whitespace; a
+    /// description is prose, whose words are one space apart. One cell holding a
+    /// run makes the column [`Entries`](Self::Entries), because a column of
+    /// descriptions has no reason to hold one.
+    ///
+    /// That threshold errs toward refusing. A description column carrying a
+    /// stray double space reads as [`Entries`](Self::Entries), and a bare code
+    /// beside it is refused rather than paired. The other direction would pair
+    /// it with something wrong and say nothing.
+    ///
+    /// The rule is defeated only by a column whose every entry pads with a
+    /// single space, which takes codes of eight characters or more throughout.
+    /// The longest code the documents print is `PU-ANC`, at six.
+    fn of(grid: &Grid, column: usize) -> Self {
+        let mut all_lone_tokens = true;
+        for row in 0..grid.row_count() {
+            let cell = grid.cell(row, column).trim();
+            if cell.is_empty() {
+                continue;
+            }
+            if pads_a_code(cell) {
+                return Self::Entries;
+            }
+            if cell.contains(char::is_whitespace) {
+                all_lone_tokens = false;
+            }
+        }
+        if all_lone_tokens {
+            Self::Codes
+        } else {
+            Self::Descriptions
+        }
+    }
+}
+
+/// Whether a cell holds a run of whitespace, which is how a document pads a code
+/// out to its description's column.
+///
+/// The cell must be trimmed, so that only a run between two words counts.
+fn pads_a_code(cell: &str) -> bool {
+    let mut after_whitespace = false;
+    for ch in cell.chars() {
+        let whitespace = ch.is_whitespace();
+        if whitespace && after_whitespace {
+            return true;
+        }
+        after_whitespace = whitespace;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -225,6 +326,89 @@ mod tests {
     #[test]
     fn rejects_a_code_with_no_description() {
         let grid = grid_of(&[&["ICE"]]);
+
+        assert_eq!(
+            read_legend(&grid),
+            Err(LabelError::LegendEntryWithoutDescription {
+                entry: "ICE".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn rejoins_a_code_the_column_boundaries_split_from_its_description() {
+        // Boundaries come from inked glyphs, so an entry's padding can exceed
+        // the column gap and leave the code in one column and the description in
+        // the next. The pair still reads as one entry.
+        let grid = grid_of(&[
+            &[
+                "ICE",
+                "Internal Combustion Engine",
+                "TC       Turbo Charger",
+            ],
+            &["ES", "Energy Store unit", ""],
+        ]);
+
+        let legend = read_legend(&grid).expect("the legend must read");
+
+        let entries: Vec<(&str, &str)> = legend
+            .entries()
+            .iter()
+            .map(|entry| (entry.code().as_str(), entry.description()))
+            .collect();
+        assert_eq!(
+            entries,
+            [
+                ("ICE", "Internal Combustion Engine"),
+                ("TC", "Turbo Charger"),
+                ("ES", "Energy Store unit"),
+            ]
+        );
+    }
+
+    #[test]
+    fn refuses_to_rejoin_a_code_with_a_cell_that_carries_its_own() {
+        // The guard. `TC       Turbo Charger` pads a code out to a description,
+        // so it is an entry, not a description. Rejoining would give `ICE` the
+        // whole of it and lose `TC`.
+        let grid = grid_of(&[&["ICE", "TC       Turbo Charger"]]);
+
+        assert_eq!(
+            read_legend(&grid),
+            Err(LabelError::LegendEntryWithoutDescription {
+                entry: "ICE".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_to_rejoin_a_code_beside_a_column_holding_an_entry_padded_by_one_space() {
+        // A code long enough to reach its description's column prints one space,
+        // so on its own it reads exactly like prose. Judged cell by cell, the
+        // entry beside `ICE` looks like a description, `ICE` swallows it whole,
+        // and `LONGCODE` never enters the legend.
+        //
+        // The column gives it away. Its other entries pad with runs, so the
+        // column holds entries, and the rejoin is refused. Every code in the
+        // column would have to be eight characters or more to fool this.
+        let grid = grid_of(&[
+            &["ICE", "LONGCODE Motor Generator Unit Kinetic"],
+            &["ES", "TC       Turbo Charger"],
+        ]);
+
+        assert_eq!(
+            read_legend(&grid),
+            Err(LabelError::LegendEntryWithoutDescription {
+                entry: "ICE".to_owned()
+            })
+        );
+    }
+
+    #[test]
+    fn refuses_to_rejoin_two_bare_codes() {
+        // A lone token could be a one-word description or a code. Pairing them
+        // would invent an entry and lose one.
+        let grid = grid_of(&[&["ICE", "TC"]]);
 
         assert_eq!(
             read_legend(&grid),

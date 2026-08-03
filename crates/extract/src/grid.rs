@@ -1,11 +1,15 @@
 //! The positioned cell grid the clustering emits.
 
 /// A detected column, as a page-space x-range.
+///
+/// The range spans the column's ink. Padding is left out: a run of spaces
+/// reaches from one column to the next, so counting it would leave every range
+/// touching its neighbours.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Column {
-    /// Left edge of the column, the smallest glyph `x0` it holds.
+    /// Left edge of the column, the smallest inked glyph `x0` it holds.
     pub x0: f32,
-    /// Right edge of the column, the largest glyph `x1` it holds.
+    /// Right edge of the column, the largest inked glyph `x1` it holds.
     pub x1: f32,
 }
 

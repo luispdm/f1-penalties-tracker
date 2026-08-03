@@ -50,7 +50,7 @@ A page shaped like the 2026 `PU elements used per driver up to now` documents,
 at their measured coordinates. Its spec is `pu_snapshot_spec()` in
 `../src/lib.rs`. Helvetica 9 pt.
 
-It carries three traps for the column mapping.
+It carries four traps for the column mapping.
 
 ### The whole page has no columns
 
@@ -100,10 +100,42 @@ U+00AD stands in faithfully: invisible when rendered, not U+002D, and fatal to a
 hardcoded literal. The real U+0002 is asserted in the `ingest` unit tests, which
 build a grid directly and need no font.
 
-### What this fixture does not cover
+### The data rows are padded with spaces
 
-Its cells sit at absolute x positions with no padding, so it emits no space
-glyphs between columns. Real documents pad, and those space glyphs chain
-adjacent columns together during clustering. A fixture for that trap has to
-carry realistic padding; this one would pass either way.
+A real snapshot draws a data row as one run of text whose cells are spaced
+apart, so a space glyph sits in every gap between columns. Those spaces have
+real boxes, and clustering their midpoints steps from one column to the next
+until the ten columns come out as one. Column left edges:
+
+| Column | 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| x | 47.9 | 74.0 | 211.0 | 303.5 | 333.5 | 360.7 | 393.7 | 430.6 | 459.2 | 489.6 |
+
+The padding must not move them, or the fixture would stop matching the
+documents it is measured from. So it is drawn on each cell's **left**, with the
+cell's origin moved back by exactly the padding's advance: the built-in
+Helvetica's space is 278/1000 em, an exact 2.502 pt at 9 pt, so a whole number of
+spaces lands the text back on the point it started from.
+A cell asks for its padding through `CellSpec::padded` and `render_table`
+places it, since `render_table` is what picks the font and the size the advance
+depends on. The counts sit beside the column coordinates in
+`pu_snapshot_spec()`.
+
+Each run is the longest that still opens clear of the column to its left,
+between 0.3 and 2.4 points past its ink. That margin is the price of the trap:
+a space advances 2.502 pt against a 12 pt `column_gap`, so a shorter run would
+break the chain. **Lengthening a team or driver name eats into it.** Go far
+enough and a run opens left of that name's last glyph; cells are read in `x0`
+order, so the padding would interleave mid-name.
+
+Measured on the fixture: the widest gap between adjacent midpoints in the table
+band is 6.79 pt, well under the 12 pt `column_gap`, so clustering midpoints with
+the spaces left in yields **one** column against a true ten.
+`crates/ingest/tests/pu_snapshot.rs` asserts the left edges, the collapse, and
+the margin on all 36 runs, so the fixture cannot quietly stop carrying the trap.
+
+The three header lines are not padded. Their fragments print at separately
+measured positions, which is the wrap trap above; padding across them would be
+inventing geometry that no document was measured for. The data rows carry the
+trap on their own.
 
