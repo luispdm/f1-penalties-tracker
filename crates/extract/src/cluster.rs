@@ -25,6 +25,19 @@
 //! layer stores each printed team string as the document prints it. Keeping them
 //! and trimming each cell's edges leaves the internal space and no padding
 //! artefact.
+//!
+//! The two passes therefore treat whitespace differently, and deliberately. The
+//! column pass drops it; the row pass clusters the baselines of every glyph. The
+//! asymmetry follows from what each pass produces. A column that whitespace
+//! invents is silent: the padding chains real columns together and the caller
+//! reads a table that looks whole. A row that whitespace invents is not, because
+//! rows are indexed positionally. A space more than `row_gap` from any inked
+//! baseline would open a row of empty cells and shift every row below it by one,
+//! so a caller that names its first data row, as
+//! `crates/ingest/tests/pu_snapshot.rs` does, would read the header as data.
+//! Filtering the row pass too would remove that hazard, but no document has
+//! shown it: no committed fixture puts a space glyph on a baseline of its own.
+//! Until one does, the row pass keeps every glyph.
 
 use crate::{
     glyph::Glyph,
@@ -65,22 +78,31 @@ impl Default for ClusterConfig {
 #[must_use]
 pub fn cluster(glyphs: &[Glyph], config: &ClusterConfig) -> Grid {
     // Columns: cluster inked midpoints ascending, so column 0 is leftmost.
-    let ink: Vec<&Glyph> = glyphs.iter().filter(|g| !g.ch.is_whitespace()).collect();
+    let ink: Vec<Glyph> = glyphs
+        .iter()
+        .copied()
+        .filter(|g| !g.ch.is_whitespace())
+        .collect();
     if ink.is_empty() {
         return Grid::new(Vec::new(), Vec::new());
     }
-    let ink_mid: Vec<f32> = ink.iter().map(|g| g.mid_x()).collect();
-    let ink_col = cluster_1d(&ink_mid, config.column_gap, Order::Ascending);
+    let ink_col = cluster_1d(
+        &ink.iter().copied().map(Glyph::mid_x).collect::<Vec<f32>>(),
+        config.column_gap,
+        Order::Ascending,
+    );
     let col_count = cluster_count(&ink_col);
 
     // Every glyph, whitespace included, then joins the column it falls in.
-    let boundaries = column_boundaries(&ink_mid, &ink_col, col_count);
+    let boundaries = column_boundaries(&ink, &ink_col, col_count);
     let col_of: Vec<usize> = glyphs
         .iter()
         .map(|g| column_at(&boundaries, g.mid_x()))
         .collect();
 
-    // Rows: cluster baselines descending, so row 0 is topmost.
+    // Rows: cluster the baselines of every glyph, descending, so row 0 is
+    // topmost. See the module doc on why this pass keeps the whitespace the
+    // column pass drops.
     let baseline: Vec<f32> = glyphs.iter().map(|g| g.y).collect();
     let row_of = cluster_1d(&baseline, config.row_gap, Order::Descending);
     let row_count = cluster_count(&row_of);
@@ -139,7 +161,7 @@ fn cluster_count(cluster_of: &[usize]) -> usize {
 /// Padding is not part of a column. A run of spaces reaches from one column's
 /// ink to the next, so counting it would leave every range touching its
 /// neighbours and the ranges would say nothing.
-fn column_ranges(ink: &[&Glyph], ink_col: &[usize], col_count: usize) -> Vec<Column> {
+fn column_ranges(ink: &[Glyph], ink_col: &[usize], col_count: usize) -> Vec<Column> {
     let mut columns = vec![
         Column {
             x0: f32::INFINITY,
@@ -160,10 +182,11 @@ fn column_ranges(ink: &[&Glyph], ink_col: &[usize], col_count: usize) -> Vec<Col
 /// A cut sits halfway between the rightmost inked midpoint of one column and the
 /// leftmost of the next, so every inked glyph keeps the column the clustering
 /// gave it and every space joins the column it is nearer.
-fn column_boundaries(ink_mid: &[f32], ink_col: &[usize], col_count: usize) -> Vec<f32> {
+fn column_boundaries(ink: &[Glyph], ink_col: &[usize], col_count: usize) -> Vec<f32> {
     let mut leftmost = vec![f32::INFINITY; col_count];
     let mut rightmost = vec![f32::NEG_INFINITY; col_count];
-    for (&mid, &col) in ink_mid.iter().zip(ink_col) {
+    for (glyph, &col) in ink.iter().zip(ink_col) {
+        let mid = glyph.mid_x();
         leftmost[col] = leftmost[col].min(mid);
         rightmost[col] = rightmost[col].max(mid);
     }

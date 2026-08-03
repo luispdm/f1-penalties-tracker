@@ -116,15 +116,23 @@ documents it is measured from. So it is drawn on each cell's **left**, with the
 cell's origin moved back by exactly the padding's advance: the built-in
 Helvetica's space is 278/1000 em, an exact 2.502 pt at 9 pt, so a whole number of
 spaces lands the text back on the point it started from.
-`CellSpec::padded` does this, and the counts sit beside the column
-coordinates in `pu_snapshot_spec()`. Each run is the longest that still opens
-clear of the column to its left, between 0.3 and 2.4 points past its ink.
+A cell asks for its padding through `CellSpec::padded` and `render_table`
+places it, since `render_table` is what picks the font and the size the advance
+depends on. The counts sit beside the column coordinates in
+`pu_snapshot_spec()`.
+
+Each run is the longest that still opens clear of the column to its left,
+between 0.3 and 2.4 points past its ink. That margin is the price of the trap:
+a space advances 2.502 pt against a 12 pt `column_gap`, so a shorter run would
+break the chain. **Lengthening a team or driver name eats into it.** Go far
+enough and a run opens left of that name's last glyph; cells are read in `x0`
+order, so the padding would interleave mid-name.
 
 Measured on the fixture: the widest gap between adjacent midpoints in the table
 band is 6.79 pt, well under the 12 pt `column_gap`, so clustering midpoints with
 the spaces left in yields **one** column against a true ten.
-`crates/ingest/tests/pu_snapshot.rs` asserts both, so the fixture cannot quietly
-stop carrying the trap.
+`crates/ingest/tests/pu_snapshot.rs` asserts the left edges, the collapse, and
+the margin on all 36 runs, so the fixture cannot quietly stop carrying the trap.
 
 The three header lines are not padded. Their fragments print at separately
 measured positions, which is the wrap trap above; padding across them would be

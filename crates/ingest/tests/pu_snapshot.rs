@@ -52,6 +52,53 @@ fn band(glyphs: &[Glyph], band: std::ops::Range<f32>) -> Grid {
     cluster(&band_glyphs(glyphs, band), &ClusterConfig::default())
 }
 
+/// The glyphs grouped by baseline, each group ordered by `x0`, which is the
+/// order `assemble_cells` reads a cell in.
+fn rows_by_baseline(glyphs: &[Glyph]) -> Vec<Vec<Glyph>> {
+    let mut baselines: Vec<f32> = glyphs.iter().map(|glyph| glyph.y).collect();
+    baselines.sort_by(f32::total_cmp);
+    baselines.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+
+    baselines
+        .into_iter()
+        .map(|baseline| {
+            let mut row: Vec<Glyph> = glyphs
+                .iter()
+                .copied()
+                .filter(|glyph| (glyph.y - baseline).abs() < 0.01)
+                .collect();
+            row.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+            row
+        })
+        .collect()
+}
+
+/// Each padding run in a row, as the x its first space opens at paired with the
+/// right edge of the nearest ink to its left.
+///
+/// A run of two counts as padding. The only other spaces the fixture prints sit
+/// inside a name, one at a time.
+fn padding_runs(row: &[Glyph]) -> Vec<(f32, f32)> {
+    let mut runs = Vec::new();
+    let mut ink_ends_at = f32::NEG_INFINITY;
+    let mut index = 0;
+    while index < row.len() {
+        if !row[index].ch.is_whitespace() {
+            ink_ends_at = ink_ends_at.max(row[index].x1);
+            index += 1;
+            continue;
+        }
+        let opens = index;
+        while index < row.len() && row[index].ch.is_whitespace() {
+            index += 1;
+        }
+        if index - opens >= 2 {
+            runs.push((row[opens].x0, ink_ends_at));
+        }
+    }
+    runs
+}
+
 fn legend_of(glyphs: &[Glyph]) -> Legend {
     read_legend(&band(glyphs, LEGEND_BAND)).expect("the legend must read")
 }
@@ -125,6 +172,31 @@ fn the_padded_table_band_carries_the_whitespace_trap() {
         columns, 1,
         "the padding must bridge every column, or the fixture proves nothing"
     );
+}
+
+#[test]
+fn every_padding_run_opens_clear_of_the_ink_to_its_left() {
+    // The runs nearly fill their gaps, and they have to: a space advances
+    // 2.502 pt against a 12 pt `column_gap`, so a shorter run breaks the chain
+    // and weakens the trap. What that costs is margin. Lengthen a team or driver
+    // name and its row's next run would open left of that name's last glyph.
+    // `assemble_cells` orders a cell's glyphs by `x0`, so the padding would
+    // interleave mid-name and the cell would come out split by spaces.
+    let rows = rows_by_baseline(&band_glyphs(&glyphs(), TABLE_BAND));
+
+    let mut checked = 0;
+    for row in &rows {
+        for (opens_at, ink_ends_at) in padding_runs(row) {
+            assert!(
+                opens_at > ink_ends_at,
+                "a padding run opens at {opens_at} but the ink to its left runs to {ink_ends_at}",
+            );
+            checked += 1;
+        }
+    }
+
+    // Nine gaps a row, over the four data rows. The header rows print no run.
+    assert_eq!(checked, 36, "the fixture must still print its padding");
 }
 
 #[test]
