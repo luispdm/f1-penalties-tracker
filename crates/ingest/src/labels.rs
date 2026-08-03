@@ -188,7 +188,14 @@ impl From<DepthRejection> for LabelError {
 ///
 /// # Errors
 ///
-/// Returns the first rule of `label_columns` the depth breaks.
+/// Returns the first rule of `label_columns` the depth breaks, checked in the
+/// order: every code on one column, then no blank header, then every column
+/// from the first code rightwards carrying one. That runs the third rule before
+/// the second, because a blank column right of the first code breaks both, and
+/// [`DepthRejection::BlankColumn`] names it where
+/// [`DepthRejection::UnknownColumn`] would report a column spelling nothing.
+/// The blank rule also reaches the identity columns, which the coverage rule
+/// never looks at.
 fn labels_at_depth(
     table: &Grid,
     legend: &Legend,
@@ -236,8 +243,14 @@ fn labels_at_depth(
     for column in column_of.iter().flatten() {
         carries_a_code[*column] = true;
     }
-    let first_code = labelled.first().map_or(columns, |(column, _)| *column);
-    if let Some(column) = (first_code..columns).find(|column| !carries_a_code[*column]) {
+    let uncovered = carries_a_code
+        .iter()
+        .copied()
+        .enumerate()
+        .skip_while(|(_, carries)| !carries)
+        .find(|(_, carries)| !carries)
+        .map(|(column, _)| column);
+    if let Some(column) = uncovered {
         return Err(DepthRejection::UnknownColumn {
             column,
             header: headers[column].clone(),
@@ -511,6 +524,21 @@ mod tests {
     fn refuses_an_empty_table() {
         let legend = legend_with('-');
 
-        assert!(label_columns(&grid_of(&[]), &legend).is_err());
+        // No row means no depth to try, so the refusal comes from the fallback
+        // rather than from a rejected depth: every legend code is unmatched.
+        assert_eq!(
+            label_columns(&grid_of(&[]), &legend),
+            Err(LabelError::HeaderDoesNotMatchLegend {
+                unmatched: vec![
+                    "ICE".to_owned(),
+                    "TC".to_owned(),
+                    "EXH".to_owned(),
+                    "MGU-K".to_owned(),
+                    "ES".to_owned(),
+                    "PU-CE".to_owned(),
+                    "PU-ANC".to_owned(),
+                ]
+            })
+        );
     }
 }
