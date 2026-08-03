@@ -169,11 +169,13 @@ Triggered by the verbs in `## Input contract`. Re-review evaluates whether the d
    gh api "repos/luispdm/f1-penalties-tracker/pulls/<N>/reviews?per_page=100" --jq '
      [.[] | select(.user.login == "luispdm-reviewer[bot]")
           | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED" or .state == "COMMENTED")]
-     | sort_by(.submitted_at, .id) | last | "\(.id) \(.commit_id) \(.state)"'
+     | sort_by(.submitted_at, .id) | last // empty | "\(.id) \(.commit_id) \(.state)"'
    ```
    Pass `per_page` in the URL and quote it. `-f per_page=100` makes `gh api` POST instead, which opens a pending review on the PR.
 
-   Take the most recent match and capture its `commit_id` as the anchor SHA and its `id` for the report. Refuse only if 0 (`no prior review found; run a full review first`). `PENDING` is an unsubmitted draft and `DISMISSED` is a retracted verdict; the filter drops both.
+   `last` on an empty array yields `null`, and the interpolation would print `null null null`, a line that reads like an answer. `// empty` prints nothing instead, so no match is silent.
+
+   Take the most recent match and capture its `commit_id` as the anchor SHA and its `id` for the report. Refuse only if the command printed nothing (`no prior review found; run a full review first`). `PENDING` is an unsubmitted draft and `DISMISSED` is a retracted verdict; the filter drops both.
 
    The most recent review anchors because steps 5 and 7 read `<anchor>..HEAD` as the developer's response, and the latest review gives the tightest diff that still holds it. An `APPROVED` review is a valid anchor: a review may file findings and approve in one submission. The cost of the rule: a thread that an older review opened and the developer fixed before the newer review falls outside the diff and reports as not addressed. That is the safe direction, and step 12 prints the anchor, so the pick is on the report.
 

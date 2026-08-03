@@ -521,6 +521,24 @@ mod tests {
     }
 
     #[test]
+    fn names_a_blank_column_right_of_the_first_code_blank_rather_than_unknown() {
+        // A blank column right of the first code breaks the blank rule and the
+        // coverage rule together, so the order `labels_at_depth` checks them in
+        // decides what the caller reads. Checking coverage first would report
+        // `HeaderColumnNotInLegend { column: 2, header: "" }`, a column that
+        // spells nothing. The column left of the first code, which the coverage
+        // scan never reaches, cannot pin this.
+        let grid = grid_of(&[row(&["A  first", "B  second"])]);
+        let legend = read_legend(&grid).expect("the legend must read");
+        let table = grid_of(&[row(&["Car", "A", "", "B"]), row(&["7", "1", "3", "2"])]);
+
+        assert_eq!(
+            label_columns(&table, &legend),
+            Err(LabelError::HeaderColumnIsBlank { column: 2 })
+        );
+    }
+
+    #[test]
     fn refuses_an_empty_table() {
         let legend = legend_with('-');
 
