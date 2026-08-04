@@ -273,9 +273,9 @@ fn blocks_of(flags: &[bool]) -> Vec<Range<usize>> {
 /// The rows above the table band that belong to the legend.
 ///
 /// The band starts at the row directly above the table and grows upward by the
-/// gaps that [`crossed`] counts. It walks every gap up to the top of the page,
-/// since no row up there is a table row: [`table_band`] refuses a page whose
-/// table rows fall in more than one block.
+/// gaps that [`crossed`] counts. It measures every gap up to the top of the page,
+/// and leaves the count to [`crossed`], since no row up there is a table row:
+/// [`table_band`] refuses a page whose table rows fall in more than one block.
 ///
 /// Returns `None` when the table band starts at the top of the page.
 fn legend_band(rows: &[Vec<Glyph>], table_start: usize) -> Option<Range<usize>> {
