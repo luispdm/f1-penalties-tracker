@@ -154,7 +154,7 @@ pub fn bands(glyphs: &[Glyph], config: &ClusterConfig) -> Result<Bands, BandErro
         .collect();
 
     let table = table_band(&table_row)?;
-    let legend = legend_band(&rows, &table_row, table.start).ok_or(BandError::NoLegendBand)?;
+    let legend = legend_band(&rows, table.start).ok_or(BandError::NoLegendBand)?;
 
     Ok(Bands {
         legend: cluster(&within(glyphs, &baselines(&rows[legend])), config),
@@ -273,25 +273,20 @@ fn blocks_of(flags: &[bool]) -> Vec<Range<usize>> {
 /// The rows above the table band that belong to the legend.
 ///
 /// The band starts at the row directly above the table and grows upward by the
-/// gaps that [`crossed`] counts.
+/// gaps that [`crossed`] counts. It walks every gap up to the top of the page,
+/// since no row up there is a table row: [`table_band`] refuses a page whose
+/// table rows fall in more than one block.
 ///
 /// Returns `None` when the table band starts at the top of the page.
-fn legend_band(
-    rows: &[Vec<Glyph>],
-    table_row: &[bool],
-    table_start: usize,
-) -> Option<Range<usize>> {
+fn legend_band(rows: &[Vec<Glyph>], table_start: usize) -> Option<Range<usize>> {
     let bottom = table_start.checked_sub(1)?;
 
-    // Every gap above the band's bottom row, nearest first, stopping at the top
-    // of the page or at a second table. Prose or a legend line above another
-    // table is not this table's legend.
-    let mut gaps = Vec::new();
-    let mut row = bottom;
-    while row > 0 && !table_row[row - 1] {
-        gaps.push(top_baseline(&rows[row - 1]) - top_baseline(&rows[row]));
-        row -= 1;
-    }
+    // Reversed, because `crossed` reads the gaps upward from the bottom row.
+    let gaps: Vec<f32> = rows[..=bottom]
+        .windows(2)
+        .rev()
+        .map(|pair| top_baseline(&pair[0]) - top_baseline(&pair[1]))
+        .collect();
 
     Some(bottom - crossed(&gaps)..table_start)
 }
