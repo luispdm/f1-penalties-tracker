@@ -239,6 +239,7 @@ fn run_widths(row: &[Glyph], column_gap: f32) -> Vec<f32> {
 /// Refuses every page that does not print exactly one block of at least
 /// [`MIN_TABLE_ROWS`] rows. Keeping the longest of several would return a table
 /// short of the rows in the blocks dropped, and a short table reads as whole.
+/// Its single block is what lets [`legend_band`] walk to the top of the page.
 fn table_band(table_row: &[bool]) -> Result<Range<usize>, BandError> {
     let mut blocks = blocks_of(table_row).into_iter();
     let block = blocks.next().ok_or(BandError::NoTableBand)?;
