@@ -47,6 +47,7 @@ use extract::{ClusterConfig, Glyph, Grid, cluster};
 
 use crate::{
     bands::{Bands, bands},
+    corrections::Correction,
     error::SnapshotError,
     identity::identity_columns,
     labels::label_columns,
@@ -72,6 +73,14 @@ const HEADER_PAGE: usize = 0;
 /// it, and mapping an event to a round belongs to the scraper. `config` is the
 /// clustering the band split runs with.
 ///
+/// `correction` is the caller's too, resolved from the run's season by
+/// [`corrections::for_season`](crate::corrections::for_season). It rewrites the
+/// legend's stale codes before the columns are labelled, which is what lets the
+/// 2026 Monaco snapshot parse; see [`corrections`](crate::corrections). Keeping
+/// the lookup outside means the parser needs no season and no document number.
+/// A correction whose codes the legend does not print changes nothing, so
+/// passing the season's correction on every document of that season is safe.
+///
 /// Every fact carries [`Claim::SnapshotCount`], the running total the page
 /// states, so a driver who fitted nothing this event still reports the count
 /// carried forward. Every fact also carries the team string printed on its row,
@@ -91,18 +100,23 @@ const HEADER_PAGE: usize = 0;
 ///
 /// Returns [`SnapshotError`]. Either no page carries a table or several do, the
 /// header states no number or more than one, the legend or the column mapping
-/// refuses, the identity columns are not the three a PU document prints, the
+/// refuses, the correction names a code the legend declares beside the code it
+/// means, the identity columns are not the three a PU document prints, the
 /// table holds no data row, or a row prints something other than a number where
 /// a car or a count belongs, or prints no team.
 pub fn parse_snapshot(
     pages: &[Vec<Glyph>],
     round: Round,
+    correction: Option<&Correction>,
     config: &ClusterConfig,
 ) -> Result<Vec<Fact>, SnapshotError> {
     let bands = table_page(pages, config)?;
     let document = document_number(pages, config)?;
 
-    let legend = read_legend(bands.legend())?;
+    let mut legend = read_legend(bands.legend())?;
+    if let Some(correction) = correction {
+        correction.apply(&mut legend)?;
+    }
     let labels = label_columns(bands.table(), &legend)?;
     let identity = identity_columns(&labels)?;
 
@@ -282,7 +296,10 @@ mod tests {
     use domain::{ComponentCode, Team};
 
     use super::*;
-    use crate::error::{BandError, IdentityError};
+    use crate::{
+        corrections,
+        error::{BandError, IdentityError, LabelError},
+    };
 
     /// Advance and width of a glyph, in points. Close to the 9-point Helvetica
     /// the documents print.
@@ -414,13 +431,54 @@ mod tests {
         glyphs
     }
 
+    /// A table page in the 2026 shape whose legend spells the exhaust code
+    /// `exhaust` while its header spells `EXH`.
+    ///
+    /// The Monaco document prints `EX` there and every other 2026 document
+    /// prints `EXH`, so the two spellings give the same page corrected and
+    /// correct. The geometry does not move between them: both legend entries
+    /// pad the code out to the same column, so a difference in the facts can
+    /// only come from the code.
+    fn exhaust_page(exhaust: &str) -> Vec<Glyph> {
+        let mut glyphs = word(
+            "The drivers entered in this synthetic championship have used",
+            42.0,
+            530.4,
+        );
+        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
+        glyphs.extend(entry(exhaust, "EXHaust set", 317.0, 489.0));
+        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+
+        glyphs.extend(word("N", 48.0, 421.9));
+        glyphs.extend(word("Car", 74.0, 421.9));
+        glyphs.extend(word("Driver", DRIVER_X, 421.9));
+        glyphs.extend(word("ICE", 303.0, 421.9));
+        glyphs.extend(word("EXH", 333.0, 421.9));
+        glyphs.extend(word("ES", 368.0, 421.9));
+
+        for (index, (car, counts)) in [("7", ["2", "3", "1"]), ("8", ["2", "4", "2"])]
+            .into_iter()
+            .enumerate()
+        {
+            #[expect(clippy::cast_precision_loss, reason = "test geometry; two rows")]
+            let y = 398.9 - 11.5 * index as f32;
+            glyphs.extend(word(car, 48.0, y));
+            glyphs.extend(word("Falcon Racing", 74.0, y));
+            glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
+            for (x, count) in [309.0, 338.0, 371.0].into_iter().zip(counts) {
+                glyphs.extend(word(count, x, y));
+            }
+        }
+        glyphs
+    }
+
     /// The whole document: a cover, then the table page.
     fn document() -> Vec<Vec<Glyph>> {
         vec![cover("9"), two_rows()]
     }
 
     fn parsed(pages: &[Vec<Glyph>]) -> Vec<Fact> {
-        parse_snapshot(pages, 9, &ClusterConfig::default()).expect("the snapshot must parse")
+        parse_snapshot(pages, 9, None, &ClusterConfig::default()).expect("the snapshot must parse")
     }
 
     /// Each fact as `(car, component, count)`, which is what the table states.
@@ -626,7 +684,7 @@ mod tests {
         truncated.extend(word("Internal Combustion Engine", 92.0, 489.0));
         truncated.extend(word("1", 300.0, 60.0));
 
-        let refusal = parse_snapshot(&[cover("9"), truncated], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[cover("9"), truncated], 9, None, &ClusterConfig::default());
 
         assert_eq!(
             refusal,
@@ -653,7 +711,7 @@ mod tests {
             split.extend(word("3", x, 320.0));
         }
 
-        let refusal = parse_snapshot(&[cover("9"), split], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[cover("9"), split], 9, None, &ClusterConfig::default());
 
         assert!(
             matches!(
@@ -669,7 +727,12 @@ mod tests {
     fn refuses_a_document_whose_pages_both_carry_a_table() {
         // Taking the first would pick one of two plausible tables with nothing
         // to tell them apart, which is the failure the epic exists to prevent.
-        let refusal = parse_snapshot(&[two_rows(), two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(
+            &[two_rows(), two_rows()],
+            9,
+            None,
+            &ClusterConfig::default(),
+        );
 
         assert_eq!(
             refusal,
@@ -679,7 +742,7 @@ mod tests {
 
     #[test]
     fn refuses_a_document_that_states_no_number() {
-        let refusal = parse_snapshot(&[two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[two_rows()], 9, None, &ClusterConfig::default());
 
         assert_eq!(refusal, Err(SnapshotError::NoDocumentNumber));
     }
@@ -693,7 +756,7 @@ mod tests {
         ambiguous.extend(word("Document", 388.3, 600.0));
         ambiguous.extend(word("14", 450.9, 600.0));
 
-        let refusal = parse_snapshot(&[ambiguous, two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[ambiguous, two_rows()], 9, None, &ClusterConfig::default());
 
         assert_eq!(
             refusal,
@@ -781,7 +844,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::CarNotANumber {
                 row: 1,
                 text: "TBC".to_owned()
@@ -802,7 +865,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::MissingTeam { row: 1, car: 7 })
         );
     }
@@ -817,6 +880,7 @@ mod tests {
             parse_snapshot(
                 &[cover("9"), wrapped_header_glyphs()],
                 9,
+                None,
                 &ClusterConfig::default()
             ),
             Err(SnapshotError::NoDataRows { header_rows: 3 })
@@ -831,7 +895,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::CountNotANumber {
                 row: 1,
                 car: 7,
@@ -863,7 +927,7 @@ mod tests {
         glyphs.extend(word("3", 338.0, 398.9));
 
         assert_eq!(
-            parse_snapshot(&[cover("9"), glyphs], 9, &ClusterConfig::default()),
+            parse_snapshot(&[cover("9"), glyphs], 9, None, &ClusterConfig::default()),
             Err(SnapshotError::Identity(
                 IdentityError::UnexpectedIdentityColumns { found: 2 }
             ))
@@ -874,7 +938,8 @@ mod tests {
     fn tags_every_fact_with_the_round_the_caller_passes() {
         // A snapshot names its event and never numbers it, so the round is the
         // caller's to supply.
-        let facts = parse_snapshot(&document(), 4, &ClusterConfig::default()).expect("must parse");
+        let facts =
+            parse_snapshot(&document(), 4, None, &ClusterConfig::default()).expect("must parse");
 
         assert!(facts.iter().all(|fact| fact.round == 4));
     }
@@ -891,8 +956,85 @@ mod tests {
     #[test]
     fn refuses_a_document_with_no_pages() {
         assert_eq!(
-            parse_snapshot(&[], 9, &ClusterConfig::default()),
+            parse_snapshot(&[], 9, None, &ClusterConfig::default()),
             Err(SnapshotError::NoTablePage { refusals: vec![] })
         );
+    }
+
+    #[test]
+    fn refuses_a_stale_legend_code_without_its_correction() {
+        // The 2026 Monaco document, and the only refusal across the 56 held
+        // locally. `EX` lands on no column and the `EXH` column matches no
+        // legend code, so the mapping refuses rather than pick a spelling.
+        let refusal = parse_snapshot(
+            &[cover("9"), exhaust_page("EX")],
+            9,
+            None,
+            &ClusterConfig::default(),
+        );
+
+        assert_eq!(
+            refusal,
+            Err(SnapshotError::Label(LabelError::HeaderDoesNotMatchLegend {
+                unmatched: vec!["EX".to_owned()]
+            }))
+        );
+    }
+
+    #[test]
+    fn reads_a_stale_legend_code_as_the_document_a_correction_makes_it() {
+        // Whole facts, not counts: any mark that a correction ran would have to
+        // ride on a fact, so equality with the correctly printed document is
+        // what proves none does.
+        let corrected = parse_snapshot(
+            &[cover("9"), exhaust_page("EX")],
+            9,
+            corrections::for_season(2026),
+            &ClusterConfig::default(),
+        )
+        .expect("the corrected snapshot must parse");
+
+        assert_eq!(corrected, parsed(&[cover("9"), exhaust_page("EXH")]));
+    }
+
+    #[test]
+    fn emits_the_code_the_header_spells() {
+        let corrected = parse_snapshot(
+            &[cover("9"), exhaust_page("EX")],
+            9,
+            corrections::for_season(2026),
+            &ClusterConfig::default(),
+        )
+        .expect("the corrected snapshot must parse");
+
+        assert_eq!(
+            counts(&corrected),
+            [
+                (7, "ICE", 2),
+                (7, "EXH", 3),
+                (7, "ES", 1),
+                (8, "ICE", 2),
+                (8, "EXH", 4),
+                (8, "ES", 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn leaves_a_correctly_printed_document_of_the_same_season_untouched() {
+        // The season's correction reaches every document of that season, so the
+        // other 2026 snapshots meet it too. Each prints `EXH` already, so the
+        // rename finds nothing and the parse runs as though no correction came.
+        let pages = [cover("9"), exhaust_page("EXH")];
+
+        let corrected = parse_snapshot(
+            &pages,
+            9,
+            corrections::for_season(2026),
+            &ClusterConfig::default(),
+        )
+        .expect("the snapshot must parse");
+
+        assert_eq!(corrected, parsed(&pages));
     }
 }

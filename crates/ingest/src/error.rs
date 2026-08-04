@@ -58,6 +58,22 @@ pub enum LabelError {
         /// The repeated code, as printed.
         code: String,
     },
+    /// A correction named a stale code the legend declares beside the code it
+    /// means, so the two are separate components and the rename would fold one
+    /// into the other.
+    ///
+    /// A refusal rather than a silent stand-down. A correction that finds both
+    /// codes has reached a document its author did not describe, and saying
+    /// nothing would leave a wrong entry in the list nobody ever hears about.
+    #[error(
+        "the correction renaming `{printed}` to `{meant}` would merge two codes the legend declares apart"
+    )]
+    CorrectionWouldMergeCodes {
+        /// The stale code the correction names, as printed.
+        printed: String,
+        /// The code it means, which the legend already declares.
+        meant: String,
+    },
     /// No depth of header rows gave each legend code exactly one column.
     #[error("no header depth labels one column per legend code; unmatched: [{}]", unmatched.join(", "))]
     HeaderDoesNotMatchLegend {

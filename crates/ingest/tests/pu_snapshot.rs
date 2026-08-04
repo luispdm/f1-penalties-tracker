@@ -172,7 +172,7 @@ const PRINTED_TABLE: [(Car, &str, [u32; 7]); 4] = [
 ];
 
 fn parsed() -> Vec<Fact> {
-    parse_snapshot(&pages(), ROUND, &ClusterConfig::default())
+    parse_snapshot(&pages(), ROUND, None, &ClusterConfig::default())
         .expect("the snapshot document must parse")
 }
 
@@ -236,7 +236,7 @@ fn a_short_table_page_is_refused_rather_than_skipped_as_a_cover() {
         .filter(|glyph| glyph.y > 470.0 || (395.0..402.0).contains(&glyph.y))
         .collect();
 
-    let refusal = parse_snapshot(&[cover, truncated], ROUND, &ClusterConfig::default());
+    let refusal = parse_snapshot(&[cover, truncated], ROUND, None, &ClusterConfig::default());
 
     assert!(
         matches!(refusal, Err(SnapshotError::NoTablePage { ref refusals }) if refusals.len() == 2),
