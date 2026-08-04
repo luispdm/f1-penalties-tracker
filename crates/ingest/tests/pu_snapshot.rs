@@ -13,7 +13,8 @@ use common::text_of;
 use domain::{Car, Claim, ComponentCode, Fact, Team};
 use extract::{ClusterConfig, Glyph, GlyphSource, Grid, PdfOxideEngine, cluster};
 use ingest::{
-    Bands, LabelError, Legend, SnapshotError, bands, label_columns, parse_snapshot, read_legend,
+    BandError, Bands, LabelError, Legend, SnapshotError, bands, label_columns, parse_snapshot,
+    read_legend,
 };
 use pdf_fixtures::SOFT_HYPHEN;
 
@@ -203,16 +204,24 @@ fn every_count_fact_matches_the_table_the_fixture_prints() {
 }
 
 #[test]
-fn the_parse_reads_the_table_page_and_skips_the_cover() {
-    // The cover prints its publication time as two narrow runs, which reads as
-    // one table row. Band on it and the parse would return a table of one row
-    // and no counts at all.
+fn the_cover_refuses_with_the_shape_every_real_cover_prints() {
+    // The variant, not merely a refusal. Page selection skips a page on any
+    // `BandError`, so a cover that drifted into refusing `SplitTable` would
+    // change no parse result and redden no other test, and the fixture would
+    // quietly stop standing for the shape all 56 local covers print.
+    //
+    // The margin is one line. The publication time is two narrow runs and reads
+    // as the page's one table row; shorten the signature below 30 points and it
+    // becomes a second narrow run standing alone, which is `SplitTable`.
     let refusal = bands(&pages()[0], &ClusterConfig::default());
 
-    assert!(
-        refusal.is_err(),
-        "the cover must refuse, or page selection proves nothing: {refusal:?}"
-    );
+    assert_eq!(refusal, Err(BandError::ShortTableBand { rows: 1 }));
+}
+
+#[test]
+fn the_parse_reads_the_table_page_and_skips_the_cover() {
+    // Band on the cover instead and the parse would return a table of one row
+    // and no counts at all.
     assert_eq!(counts(&parsed()).len(), PRINTED_TABLE.len() * 7);
 }
 

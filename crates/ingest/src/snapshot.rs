@@ -198,6 +198,11 @@ fn table_page(pages: &[Vec<Glyph>], config: &ClusterConfig) -> Result<Bands, Sna
 /// number is the key reconciliation supersedes an original by, so guessing which
 /// one is meant would silently pick which document wins.
 fn document_number(pages: &[Vec<Glyph>], config: &ClusterConfig) -> Result<u32, SnapshotError> {
+    // Unreachable as `parse_snapshot` calls it: `table_page` runs first and
+    // refuses an empty document with `NoTablePage`, so the page is always
+    // there. Call the two the other way round and this would report a missing
+    // number for a document that has no pages at all, which names the wrong
+    // fault. `refuses_a_document_with_no_pages` pins the order.
     let header = pages
         .get(HEADER_PAGE)
         .ok_or(SnapshotError::NoDocumentNumber)?;
@@ -448,10 +453,21 @@ mod tests {
 
         let facts = parsed(&pages);
 
+        // The values, not the count. Car 8 repeats car 7's row exactly, so a
+        // parser that carried a count forward wrongly would still return eight
+        // facts and only the numbers would give it away.
         assert_eq!(
-            counts(&facts).len(),
-            8,
-            "both drivers report all four components"
+            counts(&facts),
+            [
+                (7, "ICE", 2),
+                (7, "TC", 2),
+                (7, "ES", 1),
+                (7, "PU-CE", 3),
+                (8, "ICE", 2),
+                (8, "TC", 2),
+                (8, "ES", 1),
+                (8, "PU-CE", 3),
+            ]
         );
     }
 
@@ -756,6 +772,52 @@ mod tests {
                 row: 1,
                 text: "TBC".to_owned()
             })
+        );
+    }
+
+    #[test]
+    fn refuses_a_row_that_prints_no_team() {
+        // Emitting `printed_team: None` instead would drop this row out of the
+        // sweep's grouping check silently. Emitting an empty string would be
+        // worse: every teamless row would group under one name the document
+        // never printed, and the sweep would check a grouping that does not
+        // exist.
+        let pages = vec![
+            cover("9"),
+            table_page_glyphs(&[("7", "", ["2", "2", "1", "3"])]),
+        ];
+
+        assert_eq!(
+            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            Err(SnapshotError::MissingTeam { row: 1, car: 7 })
+        );
+    }
+
+    #[test]
+    fn refuses_a_table_band_that_is_all_header() {
+        // A band of wrapped header rows and no data. Every legend code lands on
+        // a column, so the mapping is happy and the depth runs to the whole
+        // band. Returning an empty fact list would read as a document nobody
+        // fitted a part at, which the sweep cannot tell from one it never saw.
+        let mut glyphs = word(
+            "The drivers entered in this synthetic championship have used",
+            42.0,
+            530.4,
+        );
+        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
+        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
+        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+        glyphs.extend(word("MGU", 330.0, 427.6));
+        glyphs.extend(word("N", 48.0, 421.9));
+        glyphs.extend(word("Car", 74.0, 421.9));
+        glyphs.extend(word("Driver", DRIVER_X, 421.9));
+        glyphs.extend(word("ICE", 303.0, 421.9));
+        glyphs.extend(word("ES", 368.0, 421.9));
+        glyphs.extend(word("-K", 333.0, 416.1));
+
+        assert_eq!(
+            parse_snapshot(&[cover("9"), glyphs], 9, &ClusterConfig::default()),
+            Err(SnapshotError::NoDataRows { header_rows: 3 })
         );
     }
 

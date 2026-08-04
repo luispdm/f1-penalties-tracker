@@ -54,6 +54,13 @@ impl IdentityColumns {
     /// No fact keys on it: a fact records the car, and the sweep resolves the
     /// seat from the roster. It is named because the count of identity columns
     /// is only meaningful once every one of them has a role.
+    ///
+    /// Public with no caller in this crate, deliberately. The three columns are
+    /// assigned by position, so the type's job is to say which position is
+    /// which, and a type that named two of three would leave the third to a
+    /// literal `2` at the call site. Issue #27 reads the same three columns from
+    /// the `New PU elements` document; keeping the accessor is what lets it call
+    /// this unchanged.
     #[must_use]
     pub fn driver(&self) -> usize {
         self.driver
