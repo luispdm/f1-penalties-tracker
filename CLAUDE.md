@@ -5,7 +5,6 @@ F1 penalties tracker, mid-migration to Rust. `PLAN.md` and the board (GitHub pro
 ## Workflow
 
 - Change flow: issue → branch `issue/NN-slug` → PR → human review → merge. CI gates every PR.
-- A small cleanup carrying no issue branches as `cleanup/slug` instead; every other change files an issue first.
 - Never push to `main`. Never merge your own PR.
 - Run `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`, and `cargo test --workspace --locked` before pushing. CI runs the same three.
 - Branch protection on `main` requires the status check `ci`, which is the job id in `.github/workflows/ci.yml`. Renaming that job detaches the gate.
