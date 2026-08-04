@@ -384,6 +384,36 @@ mod tests {
         ])
     }
 
+    /// A table page whose header wraps, up to the last header row and no
+    /// further.
+    ///
+    /// `MGU` prints above `-K`, so the line carrying the most codes reads
+    /// `N Car Driver ICE ES` and puts `ES` over the column that really holds
+    /// `MGU-K`. Reading down each column spells it correctly.
+    ///
+    /// Two tests share this page, and the pair is the point: one takes it as it
+    /// stands, a band that is all header, and the other adds a data row. So the
+    /// page a wrapped header makes and the same page with data are the same
+    /// geometry by construction, and moving a baseline moves both.
+    fn wrapped_header_glyphs() -> Vec<Glyph> {
+        let mut glyphs = word(
+            "The drivers entered in this synthetic championship have used",
+            42.0,
+            530.4,
+        );
+        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
+        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
+        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+        glyphs.extend(word("MGU", 330.0, 427.6));
+        glyphs.extend(word("N", 48.0, 421.9));
+        glyphs.extend(word("Car", 74.0, 421.9));
+        glyphs.extend(word("Driver", DRIVER_X, 421.9));
+        glyphs.extend(word("ICE", 303.0, 421.9));
+        glyphs.extend(word("ES", 368.0, 421.9));
+        glyphs.extend(word("-K", 333.0, 416.1));
+        glyphs
+    }
+
     /// The whole document: a cover, then the table page.
     fn document() -> Vec<Vec<Glyph>> {
         vec![cover("9"), two_rows()]
@@ -551,23 +581,7 @@ mod tests {
         // The wrapped header swap. `ES` prints on the line carrying the most
         // codes, one column left of where it belongs, so a parser reading along
         // that line would hand this column's count to `ES`.
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
-        // The header wraps: `MGU` above `-K`, so the middle line reads
-        // `N Car Driver ICE ES` and puts `ES` over the `MGU-K` column.
-        glyphs.extend(word("MGU", 330.0, 427.6));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("-K", 333.0, 416.1));
+        let mut glyphs = wrapped_header_glyphs();
         glyphs.extend(word("7", 48.0, 398.9));
         glyphs.extend(word("Falcon Racing", 74.0, 398.9));
         glyphs.extend(word("Ana Ferreira", DRIVER_X, 398.9));
@@ -795,28 +809,16 @@ mod tests {
 
     #[test]
     fn refuses_a_table_band_that_is_all_header() {
-        // A band of wrapped header rows and no data. Every legend code lands on
-        // a column, so the mapping is happy and the depth runs to the whole
-        // band. Returning an empty fact list would read as a document nobody
-        // fitted a part at, which the sweep cannot tell from one it never saw.
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
-        glyphs.extend(word("MGU", 330.0, 427.6));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("-K", 333.0, 416.1));
-
+        // The page above without its data row. Every legend code lands on a
+        // column, so the mapping is happy and the depth runs to the whole band.
+        // Returning an empty fact list would read as a document nobody fitted a
+        // part at, which the sweep cannot tell from one it never saw.
         assert_eq!(
-            parse_snapshot(&[cover("9"), glyphs], 9, &ClusterConfig::default()),
+            parse_snapshot(
+                &[cover("9"), wrapped_header_glyphs()],
+                9,
+                &ClusterConfig::default()
+            ),
             Err(SnapshotError::NoDataRows { header_rows: 3 })
         );
     }
