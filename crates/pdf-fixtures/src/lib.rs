@@ -74,7 +74,7 @@ pub struct TableSpec {
     pub cells: Vec<CellSpec>,
 }
 
-/// Render a table spec to PDF bytes with the built-in Helvetica font.
+/// Render a one-page table spec to PDF bytes with the built-in Helvetica font.
 ///
 /// Each cell is placed with an absolute text matrix, so its baseline lands
 /// exactly at `baseline_pt`. That lets a spec put two columns of one logical row
@@ -86,6 +86,24 @@ pub struct TableSpec {
 /// happens, because this is what chooses Helvetica and `font_size_pt`.
 #[must_use]
 pub fn render_table(spec: &TableSpec) -> Vec<u8> {
+    render_document(std::slice::from_ref(spec))
+}
+
+/// Render one spec per page to a single PDF, in the order given.
+///
+/// A snapshot is two pages, a cover and a table, and only the table page
+/// carries the counts while only the cover states the document number. A parser
+/// that takes a whole document therefore needs a fixture that is one, so a
+/// fixture cannot be one page per file.
+#[must_use]
+pub fn render_document(pages: &[TableSpec]) -> Vec<u8> {
+    let mut doc = PdfDocument::new("extract fixture");
+    doc.with_pages(pages.iter().map(page_of).collect())
+        .save(&PdfSaveOptions::default(), &mut Vec::new())
+}
+
+/// Draw one spec as a page.
+fn page_of(spec: &TableSpec) -> PdfPage {
     let mut ops = vec![
         Op::StartTextSection,
         Op::SetFont {
@@ -108,13 +126,11 @@ pub fn render_table(spec: &TableSpec) -> Vec<u8> {
     }
     ops.push(Op::EndTextSection);
 
-    let page = PdfPage::new(Mm(spec.page_width_mm), Mm(spec.page_height_mm), ops);
-    let mut doc = PdfDocument::new("extract fixture");
-    doc.with_pages(vec![page])
-        .save(&PdfSaveOptions::default(), &mut Vec::new())
+    PdfPage::new(Mm(spec.page_width_mm), Mm(spec.page_height_mm), ops)
 }
 
-/// The soft hyphen that separates the two-part codes in [`pu_snapshot_spec`].
+/// The soft hyphen that separates the two-part codes in
+/// [`pu_snapshot_table_spec`].
 ///
 /// The 2026 documents separate `PU-CE` and `PU-ANC` with U+0002, not an
 /// ordinary hyphen, so a parser matching a code against a hardcoded `"PU-CE"`
@@ -194,8 +210,95 @@ const LEGEND_LEFT_X: f32 = 42.5;
 /// spacing is part of what the fixtures test.
 const LEGEND_Y: [f32; 4] = [489.0, 475.2, 461.4, 447.6];
 
-/// A snapshot page shaped like the 2026 `PU elements used per driver up to now`
-/// documents, with invented drivers and teams.
+/// The document number the snapshot's cover page states.
+///
+/// The real documents state it on the cover and nowhere else, so this is the
+/// number a parser can only reach by reading the page it skips.
+const COVER_DOCUMENT_NUMBER: u32 = 9;
+
+/// A snapshot document: a cover page, then the page carrying the table.
+///
+/// The real documents are two pages, and which one carries the table is not
+/// fixed by position but found: a parser feeds each page to the band split and
+/// keeps the one that yields a table. This fixture is what proves it does,
+/// because its cover page is a page the band split must refuse.
+///
+/// The split of labour between the two pages is the point. The counts print on
+/// the table page and the document number prints on the cover, so neither page
+/// alone carries what a snapshot fact needs.
+#[must_use]
+pub fn pu_snapshot_spec() -> Vec<TableSpec> {
+    vec![pu_snapshot_cover_spec(), pu_snapshot_table_spec()]
+}
+
+/// The snapshot's cover page, at the coordinates measured on the real
+/// documents.
+///
+/// Every string is invented except the document's own title and the header
+/// labels a parser reads. It carries one trap.
+///
+/// **Exactly one line prints like a table row.** The band split calls a row a
+/// table row when more than half its runs of ink are narrow, and on this page
+/// only the time qualifies: `Time` and `08:58` are two narrow runs with nothing
+/// wide beside them. Every other line pairs a narrow label with a wide value, or
+/// runs wide on its own. So the page refuses with
+/// `ShortTableBand { rows: 1 }`, which is what page selection has to survive.
+///
+/// Measured on the 56 snapshots held locally, 2024 through 2026, every cover
+/// page refuses exactly this way, and every second page bands.
+///
+/// The margin is thin by construction, and a careless edit spends it. Shorten
+/// the signature below 30 points and it becomes a second narrow run standing
+/// alone, so the page prints its table rows in two blocks and refuses with
+/// `SplitTable` instead. The fixture would still refuse, and would stop
+/// carrying the shape it exists to carry.
+#[must_use]
+pub fn pu_snapshot_cover_spec() -> TableSpec {
+    // The header block's two columns: the labels, then the values.
+    const LABEL_X: f32 = 388.3;
+    const VALUE_X: f32 = 450.9;
+
+    TableSpec {
+        page_width_mm: 210.0,
+        page_height_mm: 297.0,
+        font_size_pt: SNAPSHOT_FONT_SIZE_PT,
+        cells: vec![
+            CellSpec::new("2027 SYNTHETIC GRAND PRIX", 172.6, 718.4),
+            CellSpec::new("03 - 05 July 2027", 246.7, 703.4),
+            // The addressing block. `From` and `To` are narrow, but the name
+            // beside each is wide, so neither line reads as a table row.
+            CellSpec::new("From", 46.0, 661.9),
+            CellSpec::new("The Synthetic Technical Delegate", 108.6, 661.9),
+            CellSpec::new("Document", LABEL_X, 661.9),
+            CellSpec::new(&COVER_DOCUMENT_NUMBER.to_string(), VALUE_X, 661.9),
+            CellSpec::new("To", 46.0, 641.9),
+            CellSpec::new("The Stewards", 108.6, 641.9),
+            CellSpec::new("Date", LABEL_X, 641.9),
+            CellSpec::new("03 July 2027", VALUE_X, 641.9),
+            // The one line that prints like a table row: two narrow runs.
+            CellSpec::new("Time", LABEL_X, 621.8),
+            CellSpec::new("08:58", VALUE_X, 621.8),
+            CellSpec::new("Title", 46.0, 584.3),
+            CellSpec::new("Synthetic Delegate's Report", 118.6, 584.3),
+            // One run: the label sits a single space from its value, as the
+            // documents print it, so the two never separate.
+            CellSpec::new(
+                "Description PU elements used per driver up to now",
+                46.0,
+                561.8,
+            ),
+            CellSpec::new("Enclosed", 46.0, 539.3),
+            CellSpec::new("09 SYN GP 27 TDR1.pdf", 118.6, 539.3),
+            // The signature. Wide enough to read as prose; see the doc above.
+            CellSpec::new("A. Delegate", 46.0, 487.7),
+            CellSpec::new("The Synthetic Technical Delegate", 46.0, 457.2),
+        ],
+    }
+}
+
+/// The snapshot's table page, shaped like the 2026
+/// `PU elements used per driver up to now` documents, with invented drivers and
+/// teams.
 ///
 /// It carries the two traps the column mapping has to survive, at the page
 /// coordinates measured on the real documents.
@@ -222,7 +325,7 @@ const LEGEND_Y: [f32; 4] = [489.0, 475.2, 461.4, 447.6];
 /// column: a caller must slice the page into bands before the table's columns
 /// appear at all.
 #[must_use]
-pub fn pu_snapshot_spec() -> TableSpec {
+pub fn pu_snapshot_table_spec() -> TableSpec {
     // The legend's right hand block, at the position measured on the documents.
     const LEGEND_RIGHT_X: f32 = 297.7;
 
@@ -248,8 +351,8 @@ pub fn pu_snapshot_spec() -> TableSpec {
 
 /// The same snapshot page carrying its legend band and its table band alone.
 ///
-/// [`pu_snapshot_spec`] proves that a caller must *select* the bands, since its
-/// prose spans the text width and collapses the whole page to one column. This
+/// [`pu_snapshot_table_spec`] proves that a caller must *select* the bands,
+/// since its prose spans the text width and collapses the page to one column. This
 /// page proves the other half: that a caller must *cluster* each band on its
 /// own. Select both bands together, cluster once, and the table still does not
 /// appear.
@@ -261,14 +364,14 @@ pub fn pu_snapshot_spec() -> TableSpec {
 /// the table's **10**, which is what the real 2026 documents measure, where the
 /// same entry runs from x 347 to x 533.
 ///
-/// The table is the one [`pu_snapshot_spec`] prints, padding and wrapped header
-/// included, at the same coordinates.
+/// The table is the one [`pu_snapshot_table_spec`] prints, padding and wrapped
+/// header included, at the same coordinates.
 #[must_use]
 pub fn two_band_snapshot_spec() -> TableSpec {
     // The legend's right hand block, 20 points right of where
-    // `pu_snapshot_spec` puts it. That is what carries its widest entry across
-    // the last component column, and it sits nearer the real documents, which
-    // print the block's description from x 347.
+    // `pu_snapshot_table_spec` puts it. That is what carries its widest entry
+    // across the last component column, and it sits nearer the real documents,
+    // which print the block's description from x 347.
     const LEGEND_RIGHT_X: f32 = 317.7;
 
     let mut cells = legend_cells(LEGEND_RIGHT_X);

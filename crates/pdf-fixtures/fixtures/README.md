@@ -7,8 +7,8 @@ generated at test time. Regenerate after changing a spec:
 cargo run -p pdf-fixtures --bin regen
 ```
 
-Every driver, team, and lap time here is invented. The component codes are
-regulation terminology.
+Every driver, team, lap time, and name here is invented. The component codes are
+regulation terminology, and the header labels a parser reads are structural.
 
 ## `table_grid.pdf`
 
@@ -46,11 +46,41 @@ Asserted by `crates/extract/tests/fixture.rs`.
 
 ## `pu_snapshot.pdf`
 
-A page shaped like the 2026 `PU elements used per driver up to now` documents,
-at their measured coordinates. Its spec is `pu_snapshot_spec()` in
-`../src/lib.rs`. Helvetica 9 pt.
+A **two-page** document shaped like the 2026 `PU elements used per driver up to
+now` documents, at their measured coordinates. Its spec is `pu_snapshot_spec()`
+in `../src/lib.rs`, one `TableSpec` per page. Helvetica 9 pt.
 
-It carries four traps for the column mapping.
+Two pages, as the real ones are, and neither alone carries what a snapshot fact
+needs. Page 0 is the cover and states the document number; page 1 states the
+counts. Measured over the 56 snapshots held locally, 2024 through 2026, all 56
+print `Document N` on the cover and none repeat it on the table page.
+
+### The cover page must be skipped, and cannot be skipped by index
+
+Its spec is `pu_snapshot_cover_spec()`. A parser finds the table page by feeding
+each page to `ingest::bands` and keeping the one that yields a table, so the
+cover has to be a page the band split refuses.
+
+It is. The band split calls a row a table row when more than half its runs of
+ink are narrow, and on the cover exactly one line qualifies: `Time` and `08:58`,
+two narrow runs with nothing wide beside them. Every other line pairs a narrow
+label with a wide value, or runs wide on its own. So the page refuses with
+`ShortTableBand { rows: 1 }`, which is what all 56 local covers do.
+
+The margin is thin by construction. Shorten the signature below 30 points and it
+becomes a second narrow run standing alone, so the page prints its table rows in
+two blocks and refuses with `SplitTable` instead. The fixture would still refuse
+and would stop carrying the shape it exists to carry.
+
+A table cut to one row refuses identically, and no row count separates the two:
+`ShortTableBand` can only ever carry `rows: 1`, because the band split's floor is
+two rows and a block of rows is never empty. Page selection therefore skips a
+page on any refusal, and a document where nothing bands is refused outright.
+
+### The table page
+
+Its spec is `pu_snapshot_table_spec()`. It carries four traps for the column
+mapping.
 
 ### The whole page has no columns
 
@@ -120,10 +150,10 @@ documents it is measured from. So it is drawn on each cell's **left**, with the
 cell's origin moved back by exactly the padding's advance: the built-in
 Helvetica's space is 278/1000 em, an exact 2.502 pt at 9 pt, so a whole number of
 spaces lands the text back on the point it started from.
-A cell asks for its padding through `CellSpec::padded` and `render_table`
-places it, since `render_table` is what picks the font and the size the advance
-depends on. The counts sit beside the column coordinates in
-`pu_snapshot_spec()`.
+A cell asks for its padding through `CellSpec::padded` and the renderer places
+it, since the renderer is what picks the font and the size the advance depends
+on. The counts sit beside the column coordinates in
+`pu_snapshot_table_spec()`.
 
 Each run is the longest that still opens clear of the column to its left,
 between 0.3 and 2.4 points past its ink. That margin is the price of the trap:

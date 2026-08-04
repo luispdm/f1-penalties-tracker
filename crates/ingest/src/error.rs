@@ -1,5 +1,7 @@
 //! Error types for the document parsers.
 
+use domain::{Car, ComponentCode};
+
 /// A failure while slicing a page into bands.
 ///
 /// Every variant is a refusal. A page the rules cannot read is reported and
@@ -87,5 +89,111 @@ pub enum LabelError {
     HeaderColumnIsBlank {
         /// The column, counting from the left of the table.
         column: usize,
+    },
+}
+
+/// A failure while locating a PU document's identity columns.
+///
+/// A refusal, never a guess. The three columns are found by position, so a
+/// table of another shape leaves every role unassignable.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum IdentityError {
+    /// The table prints some number of columns left of its first component
+    /// column other than the three every PU document carries.
+    #[error(
+        "the table prints {found} columns left of its first component column, not the 3 a PU document carries"
+    )]
+    UnexpectedIdentityColumns {
+        /// How many it prints.
+        found: usize,
+    },
+}
+
+/// A failure while parsing a PU snapshot document into count facts.
+///
+/// Every variant is a refusal. A snapshot is one of the three documents the
+/// invariant sweep cross-checks, so a count it cannot read exactly is dropped
+/// rather than guessed at: a row the sweep never sees raises nothing, while a
+/// row it sees wrong raises a conflict somebody can act on.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum SnapshotError {
+    /// No page of the document yielded a table band.
+    ///
+    /// Carries every page's refusal, so a table broken in two on the page that
+    /// should have carried it still reads out of the message rather than
+    /// flattening into "no table".
+    #[error("no page of the document carries a table: {}", refusals.iter().map(|(page, err)| format!("page {page}: {err}")).collect::<Vec<String>>().join("; "))]
+    NoTablePage {
+        /// Each page, with the reason its band split refused.
+        refusals: Vec<(usize, BandError)>,
+    },
+    /// More than one page yielded a table band, so which one states the counts
+    /// is ambiguous.
+    #[error("pages [{}] each carry a table, so which one states the counts is ambiguous", pages.iter().map(usize::to_string).collect::<Vec<String>>().join(", "))]
+    ManyTablePages {
+        /// The pages that banded.
+        pages: Vec<usize>,
+    },
+    /// The header states no document number, so the facts could not be tagged
+    /// with the source reconciliation supersedes an original by.
+    #[error("the document's header states no document number")]
+    NoDocumentNumber,
+    /// The header states more than one document number, so which one identifies
+    /// the document is ambiguous.
+    ///
+    /// A refusal rather than a first-match, for the same reason
+    /// [`ManyTablePages`](Self::ManyTablePages) is: the number is the key
+    /// reconciliation supersedes an original by, so choosing between two would
+    /// silently pick which document wins.
+    #[error("the document's header states more than one number: [{}]", numbers.iter().map(u32::to_string).collect::<Vec<String>>().join(", "))]
+    AmbiguousDocumentNumber {
+        /// The distinct numbers found, in the order the header prints them.
+        numbers: Vec<u32>,
+    },
+    /// The legend or the column mapping refused.
+    #[error(transparent)]
+    Label(#[from] LabelError),
+    /// The identity columns refused.
+    #[error(transparent)]
+    Identity(#[from] IdentityError),
+    /// The table band holds a header and no data row, so the document would
+    /// yield no fact at all while reading as whole.
+    #[error("the table band is {header_rows} header rows and no data row")]
+    NoDataRows {
+        /// How deep the header runs.
+        header_rows: usize,
+    },
+    /// A row printed something other than a number where the car number
+    /// belongs.
+    #[error("row {row} prints `{text}` where a car number belongs")]
+    CarNotANumber {
+        /// The row, counting from the top of the table band.
+        row: usize,
+        /// The cell text, as printed.
+        text: String,
+    },
+    /// A row printed no team.
+    ///
+    /// A refusal rather than an absent witness. The sweep cross-checks a
+    /// document's team grouping against the roster's, and a row with no team
+    /// silently drops out of that check.
+    #[error("row {row}, car {car}, prints no team")]
+    MissingTeam {
+        /// The row, counting from the top of the table band.
+        row: usize,
+        /// The car the row states.
+        car: Car,
+    },
+    /// A row printed something other than a number under a component column.
+    #[error("row {row}, car {car}, prints `{text}` under `{component}` where a count belongs")]
+    CountNotANumber {
+        /// The row, counting from the top of the table band.
+        row: usize,
+        /// The car the row states.
+        car: Car,
+        /// The component whose column it is.
+        component: ComponentCode,
+        /// The cell text, as printed.
+        text: String,
     },
 }
