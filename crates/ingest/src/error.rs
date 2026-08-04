@@ -134,14 +134,20 @@ pub enum SnapshotError {
         /// The pages that banded.
         pages: Vec<usize>,
     },
-    /// No page states a document number, so the facts could not be tagged with
-    /// the source reconciliation supersedes an original by.
-    #[error("no page of the document states a document number")]
+    /// The header states no document number, so the facts could not be tagged
+    /// with the source reconciliation supersedes an original by.
+    #[error("the document's header states no document number")]
     NoDocumentNumber,
-    /// Two pages state different document numbers.
-    #[error("the document states more than one number: [{}]", numbers.iter().map(u32::to_string).collect::<Vec<String>>().join(", "))]
-    ConflictingDocumentNumbers {
-        /// The distinct numbers found, in the order the pages print them.
+    /// The header states more than one document number, so which one identifies
+    /// the document is ambiguous.
+    ///
+    /// A refusal rather than a first-match, for the same reason
+    /// [`ManyTablePages`](Self::ManyTablePages) is: the number is the key
+    /// reconciliation supersedes an original by, so choosing between two would
+    /// silently pick which document wins.
+    #[error("the document's header states more than one number: [{}]", numbers.iter().map(u32::to_string).collect::<Vec<String>>().join(", "))]
+    AmbiguousDocumentNumber {
+        /// The distinct numbers found, in the order the header prints them.
         numbers: Vec<u32>,
     },
     /// The legend or the column mapping refused.

@@ -13,6 +13,11 @@
 //! through 2026, all 56 print `Document N` on the cover and none repeat it on
 //! the table page. So [`parse_snapshot`] takes every page.
 //!
+//! The two are read from opposite ends. The table page is found by banding every
+//! page, because which page carries the table is a property of the page. The
+//! number is read from page 0 alone, because which page carries the header is a
+//! property of the document, and every document puts it first.
+//!
 //! # Finding the table page
 //!
 //! Not by position. The parser feeds each page to the band split and keeps the
@@ -50,9 +55,15 @@ use crate::{
 
 /// The label a document's header prints before its number.
 ///
-/// Matched case-insensitively and as a whole word, so prose that merely
-/// contains the letters never yields a number.
+/// Matched case-insensitively. What follows it is what makes a match mean
+/// anything; see [`numbers_in`].
 const DOCUMENT_LABEL: &str = "document";
+
+/// The page whose header states the document number.
+///
+/// The header opens the document, so the number is read from the first page and
+/// no other. All 56 snapshots held locally, 2024 through 2026, print it there.
+const HEADER_PAGE: usize = 0;
 
 /// Parse a snapshot document into one count fact per driver per component.
 ///
@@ -79,7 +90,7 @@ const DOCUMENT_LABEL: &str = "document";
 /// # Errors
 ///
 /// Returns [`SnapshotError`]. Either no page carries a table or several do, the
-/// document states no number or more than one, the legend or the column mapping
+/// header states no number or more than one, the legend or the column mapping
 /// refuses, the identity columns are not the three a PU document prints, the
 /// table holds no data row, or a row prints something other than a number where
 /// a car or a count belongs, or prints no team.
@@ -167,25 +178,36 @@ fn table_page(pages: &[Vec<Glyph>], config: &ClusterConfig) -> Result<Bands, Sna
         .ok_or(SnapshotError::NoTablePage { refusals })
 }
 
-/// The document number the header states, read off whichever page states it.
+/// The document number the header states, read from [`HEADER_PAGE`] alone.
 ///
-/// Every page is searched rather than the cover alone. Only the cover states it
-/// today, so the search finds one number either way, and a document that ever
-/// printed it on the table page would still parse.
+/// The narrow page is the point. [`numbers_in`] asks nothing of what precedes
+/// the label, because the header welds it to the text on its left, so the rule
+/// reduces to "a line holding `document` followed by digits". That is safe on a
+/// header block and unsafe anywhere else: a footer or a sentence naming another
+/// document matches it just as well, and the match would either overwrite a good
+/// number or refuse a sound document. Reading one page keeps the loose rule
+/// pointed at the only text it was measured on.
+///
+/// Keying on the page index rather than on the pages selection skipped matters
+/// for the same reason it is safe. A document printing its header and its table
+/// on one page still states its number on page 0, while a skipped-pages framing
+/// would find nothing to read.
 ///
 /// A line stating the label without a number after it is passed over rather than
-/// refused, since prose may use the word. Two different numbers refuse: the
+/// refused, since prose may use the word. Two numbers in the header refuse: the
 /// number is the key reconciliation supersedes an original by, so guessing which
 /// one is meant would silently pick which document wins.
 fn document_number(pages: &[Vec<Glyph>], config: &ClusterConfig) -> Result<u32, SnapshotError> {
+    let header = pages
+        .get(HEADER_PAGE)
+        .ok_or(SnapshotError::NoDocumentNumber)?;
+    let page = cluster(header, config);
+
     let mut found: Vec<u32> = Vec::new();
-    for glyphs in pages {
-        let page = cluster(glyphs, config);
-        for row in 0..page.row_count() {
-            for number in numbers_in(&line_of(&page, row)) {
-                if !found.contains(&number) {
-                    found.push(number);
-                }
+    for row in 0..page.row_count() {
+        for number in numbers_in(&line_of(&page, row)) {
+            if !found.contains(&number) {
+                found.push(number);
             }
         }
     }
@@ -193,7 +215,7 @@ fn document_number(pages: &[Vec<Glyph>], config: &ClusterConfig) -> Result<u32, 
     match found.as_slice() {
         [] => Err(SnapshotError::NoDocumentNumber),
         [only] => Ok(*only),
-        _ => Err(SnapshotError::ConflictingDocumentNumbers { numbers: found }),
+        _ => Err(SnapshotError::AmbiguousDocumentNumber { numbers: found }),
     }
 }
 
@@ -226,6 +248,11 @@ fn line_of(page: &Grid, row: usize) -> String {
 ///
 /// The same welding happens on the right on 6 of the 56, printing `Document7`,
 /// which is why the whitespace between label and number is optional.
+///
+/// Dropping the left boundary is what confines the search to the header page.
+/// The rule reduces to "a line holding `document` followed by digits", which a
+/// footer or a passing reference elsewhere in a document would also satisfy. See
+/// [`document_number`].
 fn numbers_in(line: &str) -> Vec<u32> {
     let lowered = line.to_lowercase();
     lowered
@@ -552,9 +579,10 @@ mod tests {
 
     #[test]
     fn finds_the_table_page_wherever_it_sits() {
-        // Selection reads the pages rather than trusting an order no document
-        // guarantees.
-        let facts = parsed(&[two_rows(), cover("9")]);
+        // Selection reads the pages rather than trusting a position no document
+        // guarantees, so the table is found at index 2 here. The header is a
+        // different matter: it opens the document, so its page is fixed.
+        let facts = parsed(&[cover("9"), Vec::new(), two_rows()]);
 
         assert_eq!(counts(&facts).len(), 8);
     }
@@ -627,21 +655,36 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_document_that_states_two_numbers() {
+    fn refuses_a_header_that_states_two_numbers() {
         // The number is the key reconciliation supersedes an original by, so
-        // choosing between two would silently pick which document wins.
-        let mut second = cover("12");
-        second.extend(word("Document", 388.3, 600.0));
-        second.extend(word("14", 450.9, 600.0));
+        // choosing between two would silently pick which document wins. Same
+        // rule as `ManyTablePages`: refuse the ambiguity, never resolve it.
+        let mut ambiguous = cover("12");
+        ambiguous.extend(word("Document", 388.3, 600.0));
+        ambiguous.extend(word("14", 450.9, 600.0));
 
-        let refusal = parse_snapshot(&[second, two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[ambiguous, two_rows()], 9, &ClusterConfig::default());
 
         assert_eq!(
             refusal,
-            Err(SnapshotError::ConflictingDocumentNumbers {
+            Err(SnapshotError::AmbiguousDocumentNumber {
                 numbers: vec![12, 14]
             })
         );
+    }
+
+    #[test]
+    fn ignores_a_number_stated_off_the_header_page() {
+        // The reason the search is one page wide. `numbers_in` asks nothing of
+        // what precedes the label, so this footer satisfies it exactly as a
+        // header would. Searching every page would refuse this document as
+        // ambiguous, or take the wrong number if the header stated none.
+        let mut footer = two_rows();
+        footer.extend(word("Supersedes Document 3", 42.0, 60.0));
+
+        let facts = parsed(&[cover("9"), footer]);
+
+        assert!(facts.iter().all(|fact| fact.document == 9));
     }
 
     #[test]
