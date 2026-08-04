@@ -5,6 +5,9 @@
 //! documents, at their measured page coordinates, with invented drivers and
 //! teams. See `crates/pdf-fixtures/fixtures/README.md`.
 
+mod common;
+
+use common::text_of;
 use domain::ComponentCode;
 use extract::{ClusterConfig, Glyph, GlyphSource, Grid, PdfOxideEngine, cluster};
 use ingest::{Bands, LabelError, Legend, bands, label_columns, read_legend};
@@ -108,15 +111,6 @@ fn legend_of(glyphs: &[Glyph]) -> Legend {
     read_legend(banded(glyphs).legend()).expect("the legend must read")
 }
 
-/// Every cell of a grid, joined, so a test can ask what a band swallowed.
-fn text_of(grid: &Grid) -> String {
-    (0..grid.row_count())
-        .flat_map(|row| (0..grid.columns().len()).map(move |column| (row, column)))
-        .map(|(row, column)| grid.cell(row, column))
-        .collect::<Vec<&str>>()
-        .join("|")
-}
-
 /// The codes the fixture declares, in printed order, with the separator the
 /// fixture can actually carry.
 fn expected_codes() -> Vec<String> {
@@ -158,12 +152,12 @@ fn the_prose_stays_out_of_the_legend_band() {
     // Take the prose in and the band spans the text width, which collapses it
     // to one column and glues each line's second entry onto the first one's
     // description.
-    let legend = banded(&glyphs());
+    let bands = banded(&glyphs());
 
     assert!(
-        !text_of(legend.legend()).contains("drivers"),
+        !text_of(bands.legend()).contains("drivers"),
         "the prose reached the legend band: {}",
-        text_of(legend.legend())
+        text_of(bands.legend())
     );
 }
 

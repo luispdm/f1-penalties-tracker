@@ -7,6 +7,9 @@
 //!
 //! See `crates/pdf-fixtures/fixtures/README.md`.
 
+mod common;
+
+use common::text_of;
 use domain::ComponentCode;
 use extract::{ClusterConfig, Glyph, GlyphSource, PdfOxideEngine, cluster};
 use ingest::{Bands, bands, label_columns, read_legend};
@@ -30,15 +33,6 @@ fn glyphs() -> Vec<Glyph> {
 
 fn banded() -> Bands {
     bands(&glyphs(), &ClusterConfig::default()).expect("the page must band")
-}
-
-/// Every cell of a grid, joined, so a test can ask what a band swallowed.
-fn text_of(grid: &extract::Grid) -> String {
-    (0..grid.row_count())
-        .flat_map(|row| (0..grid.columns().len()).map(move |column| (row, column)))
-        .map(|(row, column)| grid.cell(row, column))
-        .collect::<Vec<&str>>()
-        .join("|")
 }
 
 /// The codes the fixture declares, in printed order, with the separator the

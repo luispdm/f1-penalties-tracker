@@ -12,15 +12,14 @@
 //!   component set.
 //! - [`label_columns`], which gives each component column its code by reading
 //!   down the column rather than along the wrapped header line.
+//! - [`bands`], which slices a page into the two regions those parsers read and
+//!   clusters each on its own.
 //!
-//! - [`bands`], which slices a page into those two regions and clusters each on
-//!   its own.
-//!
-//! Both parsers take a grid covering one band of the page. Clustering a whole
-//! page yields a single column, because the prose and the legend descriptions
-//! run across it without a gap wide enough to split, and clustering the two
-//! bands together yields two, because a legend description spans the columns
-//! beneath it. So [`bands`] slices the page and clusters each band apart.
+//! Each parser takes a grid covering one band. Clustering a whole page yields a
+//! single column, because the prose and the legend descriptions run across it
+//! without a gap wide enough to split, and clustering the two bands together
+//! yields two, because a legend description spans the columns beneath it. That
+//! is why the bands are cut and clustered apart.
 
 mod bands;
 mod error;

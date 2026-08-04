@@ -2,7 +2,7 @@
 
 /// A failure while slicing a page into bands.
 ///
-/// Both variants are refusals. A page the rules cannot read is reported and
+/// Every variant is a refusal. A page the rules cannot read is reported and
 /// dropped, because a band drawn in the wrong place yields a table that looks
 /// whole and is not.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -10,6 +10,19 @@ pub enum BandError {
     /// No row on the page prints like a row of a table.
     #[error("no row on the page prints like a table row")]
     NoTableBand,
+    /// The page prints its table rows in more than one block, so any one band
+    /// holds part of the table.
+    #[error("the page prints table rows in {blocks} separate blocks, so no band holds them all")]
+    SplitTable {
+        /// How many blocks the table rows fall in.
+        blocks: usize,
+    },
+    /// The one block of table rows is too short to carry a table.
+    #[error("the table band holds too few rows for a header row and a data row: {rows}")]
+    ShortTableBand {
+        /// How many rows the block holds.
+        rows: usize,
+    },
     /// The table band starts at the top of the page, so nothing above it can
     /// name its columns.
     #[error("the table band starts at the top of the page, so no legend sits above it")]

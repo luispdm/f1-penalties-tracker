@@ -31,6 +31,18 @@
 //! 2021 and dropped MGU-H for PU-ANC in 2026, and every such change moves the
 //! table up or down the page.
 //!
+//! **The table prints in one block.** A page prints one table, so its table
+//! rows run consecutively. Two blocks mean a rule has already failed, and the
+//! module refuses rather than keep the longer one: a table short of its last
+//! four drivers looks whole, and the invariant sweep cross-checks facts that
+//! disagree, so a driver dropped before any fact exists raises nothing. The
+//! block must also reach [`MIN_TABLE_ROWS`], the least a header row and a data
+//! row can occupy. Measured over every snapshot held locally, 38 documents from
+//! 2022 to 2026 and both pages of each, no page prints a table row outside its
+//! table, and no table runs under 20 rows. The floor is what refuses a cover
+//! page, where the time the document was published is the one row that reads
+//! like a table row.
+//!
 //! **A blank line bounds the legend.** Density cannot find the legend's top
 //! edge, because a legend line and a line of prose measure the same: both are a
 //! few wide runs. The page says it another way. The legend is a paragraph, set
@@ -40,9 +52,15 @@
 //! while each gap stays within [`BLANK_LINE`] times the smallest gap already
 //! inside it.
 //!
-//! One bound comes with that. A legend of a single line has no internal spacing
-//! to measure, so the walk takes the line above it. No season prints one: the
-//! component set runs to six codes or more, two to a line.
+//! One gap has no measure to judge it by, the first the walk crosses. It is
+//! taken on trust, and the gap above settles what it was. A first gap over
+//! [`BLANK_LINE`] times the second was the blank line itself, so the legend runs
+//! to a single line and the band keeps that line alone. Skip that test and a
+//! one-line legend seeds the walk with the blank line, 27.6 points; every prose
+//! gap above then falls under 1.5 times it, and the band swallows the paragraph
+//! rather than one row. No season prints a legend of one line, since the
+//! component set runs to six codes or more, two to a line, but the walk no
+//! longer rests on that.
 //!
 //! # Whitespace opens no row
 //!
@@ -76,6 +94,14 @@ const NARROW_RUN_PT: f32 = 30.0;
 /// spacing: 27.6 points against 13.8. Half a line of margin either way.
 const BLANK_LINE: f32 = 1.5;
 
+/// Fewest rows a block can hold and still be a table: a header row and a data
+/// row.
+///
+/// The tables measured run to 20 rows and more, so the floor rejects nothing a
+/// document prints. It rejects the pages that print no table at all, whose
+/// stray narrow line would otherwise band into a table of one row.
+const MIN_TABLE_ROWS: usize = 2;
+
 /// The two bands of a snapshot page, each clustered on its own.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Bands {
@@ -101,19 +127,25 @@ impl Bands {
 /// Slice a page's glyphs into a legend band and a table band, clustering each
 /// on its own.
 ///
-/// `glyphs` is one whole page. `config` sets both the banding and the
-/// clustering: rows come from `row_gap` and runs from `column_gap`, which are
-/// the same questions the clustering asks of the same page.
+/// `glyphs` is one whole page. `config` groups the glyphs into rows by
+/// `row_gap` and splits each row into runs by `column_gap`, the two questions
+/// the clustering asks of the same page. The thresholds that read those
+/// measurements, `NARROW_RUN_PT` and `BLANK_LINE`, are not the caller's to set:
+/// they are measured properties of the documents.
 ///
-/// The table band is the longest block of consecutive table rows, and the
-/// topmost of equals. A page prints one table, so a second block of the same
-/// length would mean the rules had already failed.
+/// The table band is the page's one block of consecutive table rows. Anything
+/// else is refused, because a page prints one table and a second block means a
+/// rule has already failed.
 ///
 /// # Errors
 ///
-/// Returns [`BandError::NoTableBand`] when no row on the page prints like a
-/// table row, and [`BandError::NoLegendBand`] when the table band starts at the
-/// top of the page with nothing above it to read.
+/// - [`BandError::NoTableBand`]: no row on the page prints like a table row.
+/// - [`BandError::SplitTable`]: the table rows fall in more than one block, so
+///   no band holds them all.
+/// - [`BandError::ShortTableBand`]: the one block is too short to carry a
+///   header row and a data row.
+/// - [`BandError::NoLegendBand`]: the table band starts at the top of the page,
+///   with nothing above it to read.
 pub fn bands(glyphs: &[Glyph], config: &ClusterConfig) -> Result<Bands, BandError> {
     let rows = rows_of_ink(glyphs, config.row_gap);
     let table_row: Vec<bool> = rows
@@ -121,7 +153,7 @@ pub fn bands(glyphs: &[Glyph], config: &ClusterConfig) -> Result<Bands, BandErro
         .map(|row| is_table_row(row, config.column_gap))
         .collect();
 
-    let table = longest_block(&table_row).ok_or(BandError::NoTableBand)?;
+    let table = table_band(&table_row)?;
     let legend = legend_band(&rows, &table_row, table.start).ok_or(BandError::NoLegendBand)?;
 
     Ok(Bands {
@@ -202,34 +234,46 @@ fn run_widths(row: &[Glyph], column_gap: f32) -> Vec<f32> {
     runs.into_iter().map(|(x0, x1)| x1 - x0).collect()
 }
 
-/// The longest block of consecutive `true` flags, the topmost of equals.
-fn longest_block(flags: &[bool]) -> Option<Range<usize>> {
-    let mut longest: Option<Range<usize>> = None;
+/// The page's one block of table rows.
+///
+/// Refuses every page that does not print exactly one block of at least
+/// [`MIN_TABLE_ROWS`] rows. Keeping the longest of several would return a table
+/// short of the rows in the blocks dropped, and a short table reads as whole.
+fn table_band(table_row: &[bool]) -> Result<Range<usize>, BandError> {
+    let mut blocks = blocks_of(table_row).into_iter();
+    let block = blocks.next().ok_or(BandError::NoTableBand)?;
+
+    let rest = blocks.count();
+    if rest > 0 {
+        return Err(BandError::SplitTable { blocks: rest + 1 });
+    }
+    if block.len() < MIN_TABLE_ROWS {
+        return Err(BandError::ShortTableBand { rows: block.len() });
+    }
+    Ok(block)
+}
+
+/// Every block of consecutive `true` flags, top to bottom.
+fn blocks_of(flags: &[bool]) -> Vec<Range<usize>> {
+    let mut blocks = Vec::new();
     let mut start: Option<usize> = None;
     for (index, flag) in flags.iter().copied().chain([false]).enumerate() {
         match (flag, start) {
             (true, None) => start = Some(index),
             (false, Some(open)) => {
-                if longest
-                    .as_ref()
-                    .is_none_or(|best| index - open > best.len())
-                {
-                    longest = Some(open..index);
-                }
+                blocks.push(open..index);
                 start = None;
             }
             _ => {}
         }
     }
-    longest
+    blocks
 }
 
 /// The rows above the table band that belong to the legend.
 ///
-/// The walk starts at the row directly above the table and climbs while the gap
-/// to the next row up stays within [`BLANK_LINE`] times the smallest gap already
-/// crossed. The first step has nothing to compare against and is always taken;
-/// see the module doc on what that costs.
+/// The band starts at the row directly above the table and grows upward by the
+/// gaps that [`crossed`] counts.
 ///
 /// Returns `None` when the table band starts at the top of the page.
 fn legend_band(
@@ -237,27 +281,47 @@ fn legend_band(
     table_row: &[bool],
     table_start: usize,
 ) -> Option<Range<usize>> {
-    let mut top = table_start.checked_sub(1)?;
-    let mut spacing: Option<f32> = None;
+    let bottom = table_start.checked_sub(1)?;
 
-    while top > 0 {
-        let above = top - 1;
-        // A second table stops the walk. Prose or a legend line above one is
-        // not this table's legend.
-        if table_row[above] {
-            break;
-        }
-        let gap = top_baseline(&rows[above]) - top_baseline(&rows[top]);
-        if let Some(seen) = spacing
-            && gap > BLANK_LINE * seen
-        {
-            break;
-        }
-        spacing = Some(spacing.map_or(gap, |seen: f32| seen.min(gap)));
-        top = above;
+    // Every gap above the band's bottom row, nearest first, stopping at the top
+    // of the page or at a second table. Prose or a legend line above another
+    // table is not this table's legend.
+    let mut gaps = Vec::new();
+    let mut row = bottom;
+    while row > 0 && !table_row[row - 1] {
+        gaps.push(top_baseline(&rows[row - 1]) - top_baseline(&rows[row]));
+        row -= 1;
     }
 
-    Some(top..table_start)
+    Some(bottom - crossed(&gaps)..table_start)
+}
+
+/// How many of the gaps above the legend's bottom row the walk crosses.
+///
+/// `gaps` runs upward from that row. The walk crosses a gap while it stays
+/// within [`BLANK_LINE`] times the smallest one crossed so far, which is the
+/// legend's own line spacing. The first gap has no such measure and is taken on
+/// trust, so the second judges it: a first gap over [`BLANK_LINE`] times the
+/// second was the blank line above a one-line legend, and the walk crosses
+/// nothing.
+fn crossed(gaps: &[f32]) -> usize {
+    let Some((&first, above)) = gaps.split_first() else {
+        return 0;
+    };
+    if above.first().is_some_and(|next| first > BLANK_LINE * next) {
+        return 0;
+    }
+
+    let mut spacing = first;
+    let mut count = 1;
+    for &gap in above {
+        if gap > BLANK_LINE * spacing {
+            break;
+        }
+        spacing = spacing.min(gap);
+        count += 1;
+    }
+    count
 }
 
 /// The baselines a block of rows spans, lowest to highest.
@@ -337,19 +401,29 @@ mod tests {
 
     /// The table alone: a header line over two data rows.
     fn table_rows() -> Vec<Glyph> {
+        let mut glyphs = header_row();
+        glyphs.extend(data_row("7", "2", 398.9));
+        glyphs.extend(data_row("7", "3", 387.4));
+        glyphs
+    }
+
+    /// The table's header line: two identity columns over four component ones.
+    fn header_row() -> Vec<Glyph> {
         let mut glyphs = word("N", 48.0, 421.9);
         glyphs.extend(word("Car", 74.0, 421.9));
         glyphs.extend(word("ICE", 303.0, 421.9));
         glyphs.extend(word("TC", 333.0, 421.9));
         glyphs.extend(word("ES", 368.0, 421.9));
         glyphs.extend(word("PU-CE", 400.0, 421.9));
-        for (index, y) in [398.9, 387.4].into_iter().enumerate() {
-            let count = if index == 0 { "2" } else { "3" };
-            glyphs.extend(word("7", 48.0, y));
-            glyphs.extend(word("Falcon Racing", 74.0, y));
-            for x in [309.0, 338.0, 371.0, 403.0] {
-                glyphs.extend(word(count, x, y));
-            }
+        glyphs
+    }
+
+    /// One data row: a car, its team, and `count` under every component.
+    fn data_row(car: &str, count: &str, y: f32) -> Vec<Glyph> {
+        let mut glyphs = word(car, 48.0, y);
+        glyphs.extend(word("Falcon Racing", 74.0, y));
+        for x in [309.0, 338.0, 371.0, 403.0] {
+            glyphs.extend(word(count, x, y));
         }
         glyphs
     }
@@ -467,6 +541,78 @@ mod tests {
         let bands = banded(&glyphs);
 
         assert_eq!(bands.legend().row_count(), 3);
+    }
+
+    #[test]
+    fn a_legend_of_one_line_takes_that_line_alone() {
+        // The first gap the walk crosses is the blank line itself, and only the
+        // gap above it says so. Take it on trust and the walk climbs the whole
+        // paragraph: four rows in one column, with the prose glued to `ICE`.
+        let mut glyphs = word(
+            "The drivers entered in this championship have used",
+            42.0,
+            530.4,
+        );
+        glyphs.extend(word(
+            "the power unit elements listed below, each",
+            42.0,
+            516.6,
+        ));
+        glyphs.extend(word("counted once per driver", 42.0, 502.8));
+        glyphs.extend(word("ICE", 42.0, 475.2));
+        glyphs.extend(word("Internal Combustion Engine", 92.0, 475.2));
+        glyphs.extend(table_rows());
+
+        let bands = banded(&glyphs);
+
+        assert_eq!(
+            bands.legend().row_count(),
+            1,
+            "the legend band: {}",
+            text_of(bands.legend())
+        );
+    }
+
+    #[test]
+    fn refuses_a_table_broken_in_two() {
+        // The failure the refusal exists for. Keeping the longer block returns
+        // the header and three data rows: cars 22, 31 and 44 leave no fact
+        // behind, so nothing downstream can tell the table is short.
+        let mut glyphs = header_row();
+        for (index, car) in ["7", "16", "81"].into_iter().enumerate() {
+            #[expect(clippy::cast_precision_loss, reason = "test geometry; three rows")]
+            let y = 410.4 - 11.5 * index as f32;
+            glyphs.extend(data_row(car, "2", y));
+        }
+        glyphs.extend(word(
+            "Cars 22, 31 and 44 sit below this line of prose",
+            42.0,
+            364.4,
+        ));
+        for (index, car) in ["22", "31", "44"].into_iter().enumerate() {
+            #[expect(clippy::cast_precision_loss, reason = "test geometry; three rows")]
+            let y = 352.9 - 11.5 * index as f32;
+            glyphs.extend(data_row(car, "2", y));
+        }
+
+        assert_eq!(
+            bands(&glyphs, &ClusterConfig::default()),
+            Err(BandError::SplitTable { blocks: 2 })
+        );
+    }
+
+    #[test]
+    fn refuses_a_page_whose_only_table_row_stands_alone() {
+        // A page number is one narrow run, so it reads as a table row. Band on
+        // it and the page comes back holding a legend and a table of one row.
+        let mut glyphs = word("ICE", 42.0, 489.0);
+        glyphs.extend(word("Internal Combustion Engine", 92.0, 489.0));
+        glyphs.extend(word("1", 300.0, 60.0));
+
+        assert_eq!(
+            bands(&glyphs, &ClusterConfig::default()),
+            Err(BandError::ShortTableBand { rows: 1 })
+        );
     }
 
     #[test]
