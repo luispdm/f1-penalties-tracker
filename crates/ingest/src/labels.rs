@@ -41,6 +41,17 @@ impl ColumnLabels {
             .map(|(_, code)| code)
     }
 
+    /// Every labelled column paired with its code, left to right.
+    ///
+    /// Identity columns are absent, so the first pair's column is also how many
+    /// identity columns the table prints: [`label_columns`] refuses any
+    /// unlabelled column right of the first code. That is what
+    /// [`identity_columns`](crate::identity_columns) counts.
+    #[must_use]
+    pub fn components(&self) -> &[(usize, ComponentCode)] {
+        &self.labelled
+    }
+
     /// The column holding `code`.
     #[must_use]
     pub fn column_of(&self, code: &str) -> Option<usize> {

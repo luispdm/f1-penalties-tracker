@@ -1,22 +1,37 @@
 //! The committed snapshot fixture, parsed through pdf_oxide and the clustering
-//! into a legend and a column mapping.
+//! into a legend, a column mapping, and count facts.
 //!
 //! The fixture is shaped like the 2026 `PU elements used per driver up to now`
 //! documents, at their measured page coordinates, with invented drivers and
-//! teams. See `crates/pdf-fixtures/fixtures/README.md`.
+//! teams. It is two pages, as the real ones are: a cover that states the
+//! document number and a table page that states the counts. See
+//! `crates/pdf-fixtures/fixtures/README.md`.
 
 mod common;
 
 use common::text_of;
-use domain::ComponentCode;
+use domain::{Car, Claim, ComponentCode, Fact, Team};
 use extract::{ClusterConfig, Glyph, GlyphSource, Grid, PdfOxideEngine, cluster};
-use ingest::{Bands, LabelError, Legend, bands, label_columns, read_legend};
+use ingest::{
+    Bands, LabelError, Legend, SnapshotError, bands, label_columns, parse_snapshot, read_legend,
+};
 use pdf_fixtures::SOFT_HYPHEN;
 
 const FIXTURE: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../pdf-fixtures/fixtures/pu_snapshot.pdf"
 );
+
+// Where the fixture prints its table. The parser finds this by banding each
+// page, never by index; the constant is here for the tests that measure one
+// page's own geometry.
+const TABLE_PAGE: usize = 1;
+
+// The round the caller passes. A snapshot names its event and never numbers it.
+const ROUND: u8 = 9;
+
+// What the fixture's cover page states as its document number.
+const DOCUMENT: u32 = 9;
 
 // Where the fixture prints its table. `bands` derives this from the page, so no
 // parser is given it. It stays for the tests that measure the fixture's own
@@ -38,10 +53,19 @@ const COLUMN_X0: [f32; 10] = [
     47.9, 74.0, 211.0, 303.5, 333.5, 360.7, 393.7, 430.6, 459.2, 489.6,
 ];
 
-fn glyphs() -> Vec<Glyph> {
+/// Every page of the fixture, in order.
+fn pages() -> Vec<Vec<Glyph>> {
     let bytes = std::fs::read(FIXTURE).expect("committed fixture must exist");
     let engine = PdfOxideEngine::from_bytes(bytes).expect("fixture must parse");
-    engine.glyphs(0).expect("page 0 must extract")
+    (0..).map_while(|page| engine.glyphs(page).ok()).collect()
+}
+
+/// The table page's glyphs, for the tests that measure that page's geometry.
+fn glyphs() -> Vec<Glyph> {
+    pages()
+        .into_iter()
+        .nth(TABLE_PAGE)
+        .expect("the fixture must carry a table page")
 }
 
 fn band_glyphs(glyphs: &[Glyph], band: std::ops::Range<f32>) -> Vec<Glyph> {
@@ -132,6 +156,153 @@ fn naive_header_line(table: &Grid, legend: &Legend) -> Vec<String> {
         .map(|column| table.cell(1, column).trim().to_owned())
         .filter(|text| legend.entry(text).is_some())
         .collect()
+}
+
+/// The table the fixture prints, row by row: car, team, then a count per
+/// component in printed column order.
+///
+/// Stated here rather than imported, so a change to the fixture's spec cannot
+/// quietly move what the test expects of it.
+const PRINTED_TABLE: [(Car, &str, [u32; 7]); 4] = [
+    (7, "Falcon Racing", [2, 2, 2, 1, 2, 2, 3]),
+    (8, "Falcon Racing", [2, 2, 2, 2, 3, 3, 4]),
+    (9, "Comet GP", [3, 3, 3, 2, 3, 3, 5]),
+    (4, "Vertex Motors", [3, 3, 3, 1, 3, 3, 4]),
+];
+
+fn parsed() -> Vec<Fact> {
+    parse_snapshot(&pages(), ROUND, &ClusterConfig::default())
+        .expect("the snapshot document must parse")
+}
+
+/// Every fact as `(car, component, count)`, which is what the table states.
+fn counts(facts: &[Fact]) -> Vec<(Car, String, u32)> {
+    facts
+        .iter()
+        .filter_map(|fact| match fact.claim {
+            Claim::SnapshotCount(count) => Some((fact.car, fact.component.to_string(), count)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_count_fact_matches_the_table_the_fixture_prints() {
+    let facts = parsed();
+
+    let expected: Vec<(Car, String, u32)> = PRINTED_TABLE
+        .iter()
+        .flat_map(|(car, _, row)| {
+            expected_codes()
+                .into_iter()
+                .zip(*row)
+                .map(move |(code, count)| (*car, code, count))
+        })
+        .collect();
+    assert_eq!(counts(&facts), expected);
+}
+
+#[test]
+fn the_parse_reads_the_table_page_and_skips_the_cover() {
+    // The cover prints its publication time as two narrow runs, which reads as
+    // one table row. Band on it and the parse would return a table of one row
+    // and no counts at all.
+    let refusal = bands(&pages()[0], &ClusterConfig::default());
+
+    assert!(
+        refusal.is_err(),
+        "the cover must refuse, or page selection proves nothing: {refusal:?}"
+    );
+    assert_eq!(counts(&parsed()).len(), PRINTED_TABLE.len() * 7);
+}
+
+#[test]
+fn a_short_table_page_is_refused_rather_than_skipped_as_a_cover() {
+    // A table cut to one row refuses exactly as the cover does, so selection
+    // skips both and no page bands. The document refuses rather than returning
+    // a table short of its drivers, and every page's reason comes back.
+    let cover = pages().swap_remove(0);
+    let truncated: Vec<Glyph> = glyphs()
+        .into_iter()
+        .filter(|glyph| glyph.y > 470.0 || (395.0..402.0).contains(&glyph.y))
+        .collect();
+
+    let refusal = parse_snapshot(&[cover, truncated], ROUND, &ClusterConfig::default());
+
+    assert!(
+        matches!(refusal, Err(SnapshotError::NoTablePage { ref refusals }) if refusals.len() == 2),
+        "expected both pages' refusals: {refusal:?}"
+    );
+}
+
+#[test]
+fn every_count_fact_carries_the_team_its_row_prints() {
+    let facts = parsed();
+
+    let teams: Vec<Option<Team>> = PRINTED_TABLE
+        .iter()
+        .flat_map(|(_, team, row)| row.iter().map(move |_| Some(Team::from(*team))))
+        .collect();
+    assert_eq!(
+        facts
+            .iter()
+            .map(|fact| fact.printed_team.clone())
+            .collect::<Vec<Option<Team>>>(),
+        teams
+    );
+}
+
+#[test]
+fn every_count_fact_carries_the_document_number_the_cover_states() {
+    // The number prints on the page the parse skips, so a parser reading the
+    // table page alone could not emit it.
+    let facts = parsed();
+
+    assert!(facts.iter().all(|fact| fact.document == DOCUMENT));
+}
+
+#[test]
+fn a_driver_who_fitted_nothing_still_reports_the_carried_forward_count() {
+    // Car 4 and car 7 each print 1 for MGU-K, the count they carried in. The
+    // snapshot is a running total, so there is no blank cell and no fact to
+    // omit.
+    let facts = parsed();
+
+    let carried: Vec<(Car, u32)> = facts
+        .iter()
+        .filter_map(|fact| match fact.claim {
+            Claim::SnapshotCount(count) if fact.component.as_str() == "MGU-K" => {
+                Some((fact.car, count))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(carried, [(7, 1), (8, 2), (9, 2), (4, 1)]);
+}
+
+#[test]
+fn the_wrapped_header_swap_does_not_corrupt_a_count() {
+    // The trap the legend-derived mapping exists for. Reading labels along the
+    // header line gives this column to `ES`, so car 7's 1 would be recorded as
+    // one energy store rather than one MGU-K, and car 7's real ES count of 2
+    // would shift right.
+    let facts = parsed();
+
+    let car_7: Vec<(String, u32)> = facts
+        .iter()
+        .filter(|fact| fact.car == 7)
+        .filter_map(|fact| match fact.claim {
+            Claim::SnapshotCount(count) => Some((fact.component.to_string(), count)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        car_7,
+        expected_codes()
+            .into_iter()
+            .zip([2, 2, 2, 1, 2, 2, 3])
+            .collect::<Vec<(String, u32)>>()
+    );
 }
 
 #[test]
