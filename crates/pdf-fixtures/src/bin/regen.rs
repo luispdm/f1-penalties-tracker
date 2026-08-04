@@ -15,7 +15,7 @@ use std::{
 };
 
 use pdf_fixtures::{
-    TableSpec, pu_snapshot_spec, render_table, table_grid_spec, two_band_snapshot_spec,
+    pu_snapshot_spec, render_document, render_table, table_grid_spec, two_band_snapshot_spec,
 };
 
 fn main() -> ExitCode {
@@ -24,9 +24,17 @@ fn main() -> ExitCode {
         PathBuf::from,
     );
 
-    if write(&dir, "table_grid.pdf", &table_grid_spec())
-        && write(&dir, "pu_snapshot.pdf", &pu_snapshot_spec())
-        && write(&dir, "two_band_snapshot.pdf", &two_band_snapshot_spec())
+    if write(&dir, "table_grid.pdf", render_table(&table_grid_spec()))
+        && write(
+            &dir,
+            "pu_snapshot.pdf",
+            render_document(&pu_snapshot_spec()),
+        )
+        && write(
+            &dir,
+            "two_band_snapshot.pdf",
+            render_table(&two_band_snapshot_spec()),
+        )
     {
         ExitCode::SUCCESS
     } else {
@@ -34,10 +42,10 @@ fn main() -> ExitCode {
     }
 }
 
-/// Render `spec` into `dir/name`, reporting whether it landed.
-fn write(dir: &Path, name: &str, spec: &TableSpec) -> bool {
+/// Write `pdf` into `dir/name`, reporting whether it landed.
+fn write(dir: &Path, name: &str, pdf: Vec<u8>) -> bool {
     let out = dir.join(name);
-    match std::fs::write(&out, render_table(spec)) {
+    match std::fs::write(&out, pdf) {
         Ok(()) => {
             println!("wrote {}", out.display());
             true

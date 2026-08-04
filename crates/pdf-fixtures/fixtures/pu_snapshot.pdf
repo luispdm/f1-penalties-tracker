@@ -1,7 +1,7 @@
 %PDF-1.3
 %Л­Ро
 1 0 obj
-<</Type/Pages/Count 1/Kids[7 0 R]>>
+<</Type/Pages/Count 2/Kids[7 0 R 8 0 R]>>
 endobj
 2 0 obj
 <</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>
@@ -19,12 +19,63 @@ endobj
 <<>>
 endobj
 7 0 obj
-<</Type/Page/MediaBox[0 0 595.27563 841.88983]/TrimBox[0 0 595.27563 841.88983]/CropBox[0 0 595.27563 841.88983]/Parent 1 0 R/Resources 8 0 R/Contents 9 0 R/Annots[]>>
+<</Type/Page/MediaBox[0 0 595.27563 841.88983]/TrimBox[0 0 595.27563 841.88983]/CropBox[0 0 595.27563 841.88983]/Parent 1 0 R/Resources 9 0 R/Contents 10 0 R/Annots[]>>
 endobj
 8 0 obj
-<</Font 3 0 R/XObject 4 0 R/ExtGState 5 0 R/Shading 6 0 R>>
+<</Type/Page/MediaBox[0 0 595.27563 841.88983]/TrimBox[0 0 595.27563 841.88983]/CropBox[0 0 595.27563 841.88983]/Parent 1 0 R/Resources 11 0 R/Contents 12 0 R/Annots[]>>
 endobj
 9 0 obj
+<</Font 3 0 R/XObject 4 0 R/ExtGState 5 0 R/Shading 6 0 R>>
+endobj
+10 0 obj
+<</Length 823>>stream
+BT
+/F5 9 Tf
+1 0 0 1 172.6 718.4 Tm
+(2027 SYNTHETIC GRAND PRIX) Tj
+1 0 0 1 246.7 703.4 Tm
+(03 - 05 July 2027) Tj
+1 0 0 1 46 661.9 Tm
+(From) Tj
+1 0 0 1 108.6 661.9 Tm
+(The Synthetic Technical Delegate) Tj
+1 0 0 1 388.3 661.9 Tm
+(Document) Tj
+1 0 0 1 450.9 661.9 Tm
+(9) Tj
+1 0 0 1 46 641.9 Tm
+(To) Tj
+1 0 0 1 108.6 641.9 Tm
+(The Stewards) Tj
+1 0 0 1 388.3 641.9 Tm
+(Date) Tj
+1 0 0 1 450.9 641.9 Tm
+(03 July 2027) Tj
+1 0 0 1 388.3 621.8 Tm
+(Time) Tj
+1 0 0 1 450.9 621.8 Tm
+(08:58) Tj
+1 0 0 1 46 584.3 Tm
+(Title) Tj
+1 0 0 1 118.6 584.3 Tm
+(Synthetic Delegate's Report) Tj
+1 0 0 1 46 561.8 Tm
+(Description PU elements used per driver up to now) Tj
+1 0 0 1 46 539.3 Tm
+(Enclosed) Tj
+1 0 0 1 118.6 539.3 Tm
+(09 SYN GP 27 TDR1.pdf) Tj
+1 0 0 1 46 487.7 Tm
+(A. Delegate) Tj
+1 0 0 1 46 457.2 Tm
+(The Synthetic Technical Delegate) Tj
+ET
+endstream 
+endobj
+11 0 obj
+<</Font 3 0 R/XObject 4 0 R/ExtGState 5 0 R/Shading 6 0 R>>
+endobj
+12 0 obj
 <</Length 2909>>stream
 BT
 /F5 9 Tf
@@ -155,28 +206,31 @@ BT
 ET
 endstream 
 endobj
-10 0 obj
+13 0 obj
 <</Type/Catalog/PageLayout/OneColumn/PageMode/UseNone/Pages 1 0 R>>
 endobj
-11 0 obj
+14 0 obj
 <</Trapped/False/CreationDate(D:19700101000000+00'00')/ModDate(D:19700101000000+00'00')/GTS_PDFXVersion()/Title<FEFF006500780074007200610063007400200066006900780074007500720065>/Author()/Creator()/Producer()/Subject()/Identifier()/Keywords()>>
 endobj
 xref
-0 12
+0 15
 0000000000 65535 f 
 0000000015 00000 n 
-0000000066 00000 n 
-0000000154 00000 n 
-0000000183 00000 n 
-0000000203 00000 n 
-0000000223 00000 n 
-0000000243 00000 n 
-0000000426 00000 n 
-0000000501 00000 n 
-0000003460 00000 n 
-0000003544 00000 n 
+0000000072 00000 n 
+0000000160 00000 n 
+0000000189 00000 n 
+0000000209 00000 n 
+0000000229 00000 n 
+0000000249 00000 n 
+0000000433 00000 n 
+0000000618 00000 n 
+0000000693 00000 n 
+0000001566 00000 n 
+0000001642 00000 n 
+0000004602 00000 n 
+0000004686 00000 n 
 trailer
-<</Root 10 0 R/Info 11 0 R/ID[(HCJEJEGHBAFICDFFBJIDBAIBJGDADAGJ)(HAGDGDAHDEGHBCFAHHDBHFHBEGCFIFGC)]/Size 12>>
+<</Root 13 0 R/Info 14 0 R/ID[(HCJEJEGHBAFICDFFBJIDBAIBJGDADAGJ)(HAGDGDAHDEGHBCFAHHDBHFHBEGCFIFGC)]/Size 15>>
 startxref
-3804
+4946
 %%EOF
