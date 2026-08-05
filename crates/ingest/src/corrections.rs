@@ -352,4 +352,49 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn no_entry_renames_a_code_a_later_rename_would_move_again() {
+        // `apply` folds the renames in slice order and each one acts on what the
+        // last left, so an entry carrying `A -> B` beside `B -> C` walks a legend
+        // printing `A` all the way to `C` and gives a different answer if the two
+        // lines swap. Nothing refuses either way, and the emitted code is one no
+        // document printed.
+        for entry in KNOWN {
+            let chained = entry.renames.iter().find(|rename| {
+                entry
+                    .renames
+                    .iter()
+                    .any(|other| other.printed == rename.meant)
+            });
+
+            assert_eq!(
+                chained.map(|rename| rename.printed),
+                None,
+                "season {} renames into a code it renames again",
+                entry.season
+            );
+        }
+    }
+
+    #[test]
+    fn no_entry_names_one_stale_code_twice() {
+        // The same silent failure from the other side. The first rename takes
+        // the code, so the second finds nothing and stands down, and which
+        // replacement wins is the order the entry happens to list them in.
+        for entry in KNOWN {
+            let mut printed: Vec<&str> =
+                entry.renames.iter().map(|rename| rename.printed).collect();
+            printed.sort_unstable();
+            let count = printed.len();
+            printed.dedup();
+
+            assert_eq!(
+                printed.len(),
+                count,
+                "season {} names one stale code twice",
+                entry.season
+            );
+        }
+    }
 }

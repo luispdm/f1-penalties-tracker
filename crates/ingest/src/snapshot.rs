@@ -339,10 +339,69 @@ mod tests {
         glyphs
     }
 
+    /// The page's left margin, where the prose and the first legend column
+    /// start.
+    const LEFT_MARGIN: f32 = 42.0;
+
+    /// Baselines a table page prints on, in the order the page reads: the
+    /// prose, the two legend rows, the header, and the first data row.
+    ///
+    /// Every page builder below reads these, so moving one moves them all. The
+    /// builders differ in what they print, never in where.
+    const PROSE_Y: f32 = 530.4;
+    const LEGEND_Y: [f32; 2] = [489.0, 475.2];
+    const HEADER_Y: f32 = 421.9;
+    const FIRST_ROW_Y: f32 = 398.9;
+    /// The drop from one data row's baseline to the next.
+    const ROW_PITCH: f32 = 11.5;
+
+    /// Left edge of the two columns a legend prints its entries in.
+    const LEGEND_X: [f32; 2] = [LEFT_MARGIN, 317.0];
+
     /// Left edge of each table column: the three identity ones, then one per
-    /// component.
+    /// component. A header code starts a few points left of the counts beneath
+    /// it, exactly as the documents print one.
+    const N_X: f32 = 48.0;
+    const CAR_X: f32 = 74.0;
     const DRIVER_X: f32 = 200.0;
+    const CODE_X: [f32; 4] = [303.0, 333.0, 368.0, 400.0];
     const COUNT_X: [f32; 4] = [309.0, 338.0, 371.0, 403.0];
+
+    /// The baseline of the data row at `index`, counting from the first.
+    fn row_y(index: usize) -> f32 {
+        #[expect(clippy::cast_precision_loss, reason = "test geometry; a few rows")]
+        let dropped = ROW_PITCH * index as f32;
+        FIRST_ROW_Y - dropped
+    }
+
+    /// The prose every table page prints between its heading and its legend.
+    ///
+    /// The band split needs it: it is the low-density block that keeps the
+    /// legend off the top of the page.
+    fn prose() -> Vec<Glyph> {
+        word(
+            "The drivers entered in this synthetic championship have used",
+            LEFT_MARGIN,
+            PROSE_Y,
+        )
+    }
+
+    /// The three identity headers every PU document prints left of its
+    /// components.
+    fn identity_header() -> Vec<Glyph> {
+        let mut glyphs = word("N", N_X, HEADER_Y);
+        glyphs.extend(word("Car", CAR_X, HEADER_Y));
+        glyphs.extend(word("Driver", DRIVER_X, HEADER_Y));
+        glyphs
+    }
+
+    /// A data row's three identity cells, left of its counts.
+    fn identity_row(car: &str, team: &str, y: f32) -> Vec<Glyph> {
+        let mut glyphs = word(car, N_X, y);
+        glyphs.extend(word(team, CAR_X, y));
+        glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
+        glyphs
+    }
 
     /// One legend entry drawn as the documents draw it: the code padded out to
     /// its description, both in one run, so the pair binds into one cell.
@@ -357,35 +416,30 @@ mod tests {
 
     /// A table page: prose, a legend, then the table.
     fn table_page_glyphs(rows: &[(&str, &str, [&str; 4])]) -> Vec<Glyph> {
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("TC", "Turbo Charger", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("TC", "Turbo Charger", LEGEND_X[1], LEGEND_Y[0]));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
         glyphs.extend(entry(
             "PU-CE",
             "Power Unit Control Electronics",
-            317.0,
-            475.2,
+            LEGEND_X[1],
+            LEGEND_Y[1],
         ));
 
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("TC", 333.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("PU-CE", 400.0, 421.9));
+        glyphs.extend(identity_header());
+        for (x, code) in CODE_X.into_iter().zip(["ICE", "TC", "ES", "PU-CE"]) {
+            glyphs.extend(word(code, x, HEADER_Y));
+        }
 
         for (index, (car, team, counts)) in rows.iter().enumerate() {
-            #[expect(clippy::cast_precision_loss, reason = "test geometry; a few rows")]
-            let y = 398.9 - 11.5 * index as f32;
-            glyphs.extend(word(car, 48.0, y));
-            glyphs.extend(word(team, 74.0, y));
-            glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
+            let y = row_y(index);
+            glyphs.extend(identity_row(car, team, y));
             for (x, count) in COUNT_X.into_iter().zip(counts) {
                 glyphs.extend(word(count, x, y));
             }
@@ -413,21 +467,31 @@ mod tests {
     /// page a wrapped header makes and the same page with data are the same
     /// geometry by construction, and moving a baseline moves both.
     fn wrapped_header_glyphs() -> Vec<Glyph> {
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
-        glyphs.extend(word("MGU", 330.0, 427.6));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("-K", 333.0, 416.1));
+        // The two baselines the wrap adds, above and below the line carrying the
+        // most codes. They belong to this page alone.
+        const ABOVE_Y: f32 = 427.6;
+        const BELOW_Y: f32 = 416.1;
+
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry(
+            "MGU-K",
+            "Motor Generator Unit Kinetic",
+            LEGEND_X[1],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
+        // `MGU` sits a shade left of `-K`, as the wrapped header prints it.
+        glyphs.extend(word("MGU", CODE_X[1] - 3.0, ABOVE_Y));
+        glyphs.extend(identity_header());
+        glyphs.extend(word("ICE", CODE_X[0], HEADER_Y));
+        glyphs.extend(word("ES", CODE_X[2], HEADER_Y));
+        glyphs.extend(word("-K", CODE_X[1], BELOW_Y));
         glyphs
     }
 
@@ -439,33 +503,33 @@ mod tests {
     /// correct. The geometry does not move between them: both legend entries
     /// pad the code out to the same column, so a difference in the facts can
     /// only come from the code.
+    ///
+    /// The page reads the same constants as [`table_page_glyphs`], down to the
+    /// count columns, so moving a baseline moves both rather than leaving this
+    /// one passing on geometry no other test uses.
     fn exhaust_page(exhaust: &str) -> Vec<Glyph> {
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry(exhaust, "EXHaust set", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry(exhaust, "EXHaust set", LEGEND_X[1], LEGEND_Y[0]));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
 
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("EXH", 333.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
+        glyphs.extend(identity_header());
+        for (x, code) in CODE_X.into_iter().zip(["ICE", "EXH", "ES"]) {
+            glyphs.extend(word(code, x, HEADER_Y));
+        }
 
         for (index, (car, counts)) in [("7", ["2", "3", "1"]), ("8", ["2", "4", "2"])]
             .into_iter()
             .enumerate()
         {
-            #[expect(clippy::cast_precision_loss, reason = "test geometry; two rows")]
-            let y = 398.9 - 11.5 * index as f32;
-            glyphs.extend(word(car, 48.0, y));
-            glyphs.extend(word("Falcon Racing", 74.0, y));
-            glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
-            for (x, count) in [309.0, 338.0, 371.0].into_iter().zip(counts) {
+            let y = row_y(index);
+            glyphs.extend(identity_row(car, "Falcon Racing", y));
+            for (x, count) in COUNT_X.into_iter().zip(counts) {
                 glyphs.extend(word(count, x, y));
             }
         }
@@ -652,12 +716,10 @@ mod tests {
         // codes, one column left of where it belongs, so a parser reading along
         // that line would hand this column's count to `ES`.
         let mut glyphs = wrapped_header_glyphs();
-        glyphs.extend(word("7", 48.0, 398.9));
-        glyphs.extend(word("Falcon Racing", 74.0, 398.9));
-        glyphs.extend(word("Ana Ferreira", DRIVER_X, 398.9));
-        glyphs.extend(word("2", 309.0, 398.9));
-        glyphs.extend(word("5", 338.0, 398.9));
-        glyphs.extend(word("1", 371.0, 398.9));
+        glyphs.extend(identity_row("7", "Falcon Racing", row_y(0)));
+        for (x, count) in COUNT_X.into_iter().zip(["2", "5", "1"]) {
+            glyphs.extend(word(count, x, row_y(0)));
+        }
 
         let facts = parsed(&[cover("9"), glyphs]);
 
@@ -714,13 +776,16 @@ mod tests {
         // The reason every page's refusal is carried. A table broken in two is
         // a stronger signal than a cover page, and flattening it into "no
         // table" would throw that away.
+        // The second block sits far below the first, with prose between them.
+        const BELOW_Y: f32 = 320.0;
+
         let mut split = two_rows();
-        split.extend(word("Cars below this line of prose", 42.0, 340.0));
-        split.extend(word("9", 48.0, 320.0));
-        split.extend(word("Comet GP", 74.0, 320.0));
-        split.extend(word("Rosa Iglesias", 160.0, 320.0));
-        for x in [309.0, 338.0, 371.0, 403.0] {
-            split.extend(word("3", x, 320.0));
+        split.extend(word("Cars below this line of prose", LEFT_MARGIN, 340.0));
+        split.extend(word("9", N_X, BELOW_Y));
+        split.extend(word("Comet GP", CAR_X, BELOW_Y));
+        split.extend(word("Rosa Iglesias", 160.0, BELOW_Y));
+        for x in COUNT_X {
+            split.extend(word("3", x, BELOW_Y));
         }
 
         let refusal = parse_snapshot(&[cover("9"), split], 9, None, &ClusterConfig::default());
@@ -922,21 +987,25 @@ mod tests {
         // Without a driver column the roles cannot be assigned by position, so
         // the team witness would come from whichever column happened to sit
         // second.
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("TC", "Turbo Charger", 42.0, 475.2));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("TC", 333.0, 421.9));
-        glyphs.extend(word("7", 48.0, 398.9));
-        glyphs.extend(word("Falcon Racing", 74.0, 398.9));
-        glyphs.extend(word("2", 309.0, 398.9));
-        glyphs.extend(word("3", 338.0, 398.9));
+        // The standard page, minus its driver column.
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("TC", "Turbo Charger", LEGEND_X[0], LEGEND_Y[1]));
+        glyphs.extend(word("N", N_X, HEADER_Y));
+        glyphs.extend(word("Car", CAR_X, HEADER_Y));
+        glyphs.extend(word("7", N_X, row_y(0)));
+        glyphs.extend(word("Falcon Racing", CAR_X, row_y(0)));
+        for (index, code) in ["ICE", "TC"].into_iter().enumerate() {
+            glyphs.extend(word(code, CODE_X[index], HEADER_Y));
+        }
+        for (index, count) in ["2", "3"].into_iter().enumerate() {
+            glyphs.extend(word(count, COUNT_X[index], row_y(0)));
+        }
 
         assert_eq!(
             parse_snapshot(&[cover("9"), glyphs], 9, None, &ClusterConfig::default()),
