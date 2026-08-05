@@ -45,11 +45,9 @@
 //! - Deriving the code from the capitals in the description yields `EEX` from
 //!   2025's `Engine EXhaust system`, not `EX`.
 //!
-//! The 2025 Chinese snapshot, which duplicates car 30 and drops car 06, is left
-//! uncorrected on purpose. The document really prints the row twice, the sweep
-//! is the only component that can report the contradiction, and correcting it
-//! here would take the contradiction away from it. It also sits outside what a
-//! rename can express.
+//! The 2025 Chinese snapshot, which duplicates car 30, is left uncorrected on
+//! purpose and sits outside what a rename can express. See
+//! [`parse_snapshot`](crate::parse_snapshot) for why.
 
 use domain::Season;
 
@@ -113,8 +111,24 @@ static KNOWN: &[Correction] = &[
 
 /// The correction that applies to a season's documents, if any.
 ///
-/// The caller resolves this and hands the result to the parser, so the parser
-/// needs no season, no document number, and no lookup of its own.
+/// The caller resolves this once and passes the result to
+/// [`parse_snapshot`](crate::parse_snapshot) for every document of that season,
+/// so the parser needs no season, no document number, and no lookup of its own.
+/// Passing it to a correctly printed document is safe: a rename whose code the
+/// legend does not print stands down.
+///
+/// # Examples
+///
+/// ```
+/// use ingest::corrections;
+///
+/// // 2026 carries the Monaco snapshot's stale legend code.
+/// let correction = corrections::for_season(2026);
+/// assert!(correction.is_some());
+///
+/// // 2025 prints that same code as a live one, so no correction reaches it.
+/// assert!(corrections::for_season(2025).is_none());
+/// ```
 #[must_use]
 pub fn for_season(season: Season) -> Option<&'static Correction> {
     KNOWN.iter().find(|correction| correction.season == season)
@@ -125,6 +139,7 @@ mod tests {
     //! The correction, driven through the seam it exists to unblock: a legend
     //! read from cells, corrected, then labelled against a header. No PDF.
 
+    use domain::ComponentCode;
     use extract::{Column, Grid};
 
     use super::*;
@@ -180,9 +195,9 @@ mod tests {
 
     /// Every column's code, left to right, `None` where the header names no
     /// component.
-    fn codes(labels: &ColumnLabels) -> Vec<Option<String>> {
+    fn codes(labels: &ColumnLabels) -> Vec<Option<&str>> {
         (0..4)
-            .map(|column| labels.code_at(column).map(|code| code.as_str().to_owned()))
+            .map(|column| labels.code_at(column).map(ComponentCode::as_str))
             .collect()
     }
 
@@ -195,19 +210,11 @@ mod tests {
         monaco().apply(&mut legend).expect("the rename must apply");
         let labels = label_columns(&table(), &legend).expect("the columns must label");
 
-        assert_eq!(
-            codes(&labels),
-            [
-                None,
-                Some("ICE".to_owned()),
-                Some("EXH".to_owned()),
-                Some("ES".to_owned()),
-            ]
-        );
+        assert_eq!(codes(&labels), [None, Some("ICE"), Some("EXH"), Some("ES")]);
     }
 
     #[test]
-    fn the_uncorrected_legend_refuses_the_same_table() {
+    fn refuses_the_same_table_when_the_correction_does_not_run() {
         // What the correction buys, stated as the refusal it removes. Without
         // this the labelling test above would pass on a correction that did
         // nothing.
@@ -292,12 +299,12 @@ mod tests {
 
         monaco().apply(&mut legend).expect("the rename must apply");
 
-        let codes: Vec<&str> = legend
+        let declared: Vec<&str> = legend
             .entries()
             .iter()
             .map(|entry| entry.code().as_str())
             .collect();
-        assert_eq!(codes, ["ICE", "EXH", "ES"]);
+        assert_eq!(declared, ["ICE", "EXH", "ES"]);
     }
 
     #[test]
@@ -306,12 +313,15 @@ mod tests {
     }
 
     #[test]
-    fn resolves_nothing_for_a_season_no_entry_names() {
-        // 2025 is the case that matters: it prints `EX` as a live code, so a
-        // correction reaching it would rewrite a correct legend into a wrong
-        // one.
+    fn resolves_nothing_for_the_season_that_prints_the_stale_code_as_a_live_one() {
+        // The case the season key exists for. 2025 prints `EX  Engine EXhaust
+        // system` correctly, so a correction reaching it would rewrite a right
+        // legend into a wrong one.
         assert_eq!(for_season(2025), None);
-        assert_eq!(for_season(2024), None);
+    }
+
+    #[test]
+    fn resolves_nothing_for_a_season_no_entry_names() {
         assert_eq!(for_season(2027), None);
     }
 

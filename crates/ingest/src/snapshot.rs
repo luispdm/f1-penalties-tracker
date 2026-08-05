@@ -481,6 +481,18 @@ mod tests {
         parse_snapshot(pages, 9, None, &ClusterConfig::default()).expect("the snapshot must parse")
     }
 
+    /// The same, with the correction a 2026 run resolves. Every 2026 document
+    /// meets it, not just the one it repairs.
+    fn corrected(pages: &[Vec<Glyph>]) -> Vec<Fact> {
+        parse_snapshot(
+            pages,
+            9,
+            corrections::for_season(2026),
+            &ClusterConfig::default(),
+        )
+        .expect("the corrected snapshot must parse")
+    }
+
     /// Each fact as `(car, component, count)`, which is what the table states.
     fn counts(facts: &[Fact]) -> Vec<(Car, &str, u32)> {
         facts
@@ -986,29 +998,17 @@ mod tests {
         // Whole facts, not counts: any mark that a correction ran would have to
         // ride on a fact, so equality with the correctly printed document is
         // what proves none does.
-        let corrected = parse_snapshot(
-            &[cover("9"), exhaust_page("EX")],
-            9,
-            corrections::for_season(2026),
-            &ClusterConfig::default(),
-        )
-        .expect("the corrected snapshot must parse");
+        let facts = corrected(&[cover("9"), exhaust_page("EX")]);
 
-        assert_eq!(corrected, parsed(&[cover("9"), exhaust_page("EXH")]));
+        assert_eq!(facts, parsed(&[cover("9"), exhaust_page("EXH")]));
     }
 
     #[test]
     fn emits_the_code_the_header_spells() {
-        let corrected = parse_snapshot(
-            &[cover("9"), exhaust_page("EX")],
-            9,
-            corrections::for_season(2026),
-            &ClusterConfig::default(),
-        )
-        .expect("the corrected snapshot must parse");
+        let facts = corrected(&[cover("9"), exhaust_page("EX")]);
 
         assert_eq!(
-            counts(&corrected),
+            counts(&facts),
             [
                 (7, "ICE", 2),
                 (7, "EXH", 3),
@@ -1027,14 +1027,6 @@ mod tests {
         // rename finds nothing and the parse runs as though no correction came.
         let pages = [cover("9"), exhaust_page("EXH")];
 
-        let corrected = parse_snapshot(
-            &pages,
-            9,
-            corrections::for_season(2026),
-            &ClusterConfig::default(),
-        )
-        .expect("the snapshot must parse");
-
-        assert_eq!(corrected, parsed(&pages));
+        assert_eq!(corrected(&pages), parsed(&pages));
     }
 }
