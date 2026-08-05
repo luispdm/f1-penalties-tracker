@@ -30,7 +30,8 @@ Your binding scope is the issue, its parent (when it is a sub-issue), and `CLAUD
 
 - **`writing-clearly-and-concisely`** — always, before writing any prose (PR body, issue comments, decision records, commit messages).
 - **`github-issues`** — always, for every issue and board operation (read, assign, move card, comment, dependencies). See "Board".
-- Otherwise no skill is mandatory. Survey the installed skills and apply those that fit the issue: `rust-best-practices` for Rust code, `rust-review` for risky parsing. Some issues need none (e.g. "delete the Go tree").
+- **`rust-best-practices`** — whenever you deal with Rust code
+- Otherwise no skill is mandatory. Survey the installed skills and apply if it fits the issue: `rust-review` for risky parsing of Rust code. Some issues need none (e.g. "delete the Go tree").
 
 ## Mode detection
 
