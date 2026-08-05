@@ -65,6 +65,35 @@ impl Legend {
             .iter()
             .position(|entry| entry.code.as_str() == code)
     }
+
+    /// Rename the entry whose code is exactly `printed` to `meant`.
+    ///
+    /// The one edit a [`Correction`](crate::corrections::Correction) may make.
+    /// The description stays as printed, because a stale code is stale on its
+    /// own: the 2026 Monaco legend already describes `EX` as `EXHaust set`.
+    ///
+    /// A legend that does not print `printed` stands down silently and passes
+    /// through untouched, which is how one season-wide correction leaves every
+    /// correctly printed document of that season alone.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LabelError::CorrectionWouldMergeCodes`] when the legend
+    /// declares both codes. The two are then separate components, so renaming
+    /// would fold one into the other and hand its column's counts away.
+    pub(crate) fn rename(&mut self, printed: &str, meant: &str) -> Result<(), LabelError> {
+        let Some(index) = self.position(printed) else {
+            return Ok(());
+        };
+        if self.position(meant).is_some() {
+            return Err(LabelError::CorrectionWouldMergeCodes {
+                printed: printed.to_owned(),
+                meant: meant.to_owned(),
+            });
+        }
+        self.entries[index].code = ComponentCode::new(meant);
+        Ok(())
+    }
 }
 
 /// Read a legend block, pairing each code with its description.

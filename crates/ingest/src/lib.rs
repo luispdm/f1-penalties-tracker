@@ -18,6 +18,9 @@
 //!   prints left of its components, by position rather than header text.
 //! - [`parse_snapshot`], which turns a whole `PU elements used per driver up to
 //!   now` document into one count fact per driver per component.
+//! - [`corrections`], the list of documents known to print a legend code their
+//!   own table contradicts. The caller resolves the entry for its season and
+//!   hands it to the parser, so no parser here holds a season or looks one up.
 //!
 //! Each step below the parser takes a grid covering one band. Clustering a whole
 //! page yields a single column, because the prose and the legend descriptions
@@ -30,6 +33,7 @@
 //! another.
 
 mod bands;
+pub mod corrections;
 mod error;
 mod identity;
 mod labels;

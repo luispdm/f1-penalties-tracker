@@ -47,6 +47,7 @@ use extract::{ClusterConfig, Glyph, Grid, cluster};
 
 use crate::{
     bands::{Bands, bands},
+    corrections::Correction,
     error::SnapshotError,
     identity::identity_columns,
     labels::label_columns,
@@ -72,6 +73,14 @@ const HEADER_PAGE: usize = 0;
 /// it, and mapping an event to a round belongs to the scraper. `config` is the
 /// clustering the band split runs with.
 ///
+/// `correction` is the caller's too, resolved from the run's season by
+/// [`corrections::for_season`](crate::corrections::for_season). It rewrites the
+/// legend's stale codes before the columns are labelled, which is what lets the
+/// 2026 Monaco snapshot parse; see [`corrections`](crate::corrections). Keeping
+/// the lookup outside means the parser needs no season and no document number.
+/// A correction whose codes the legend does not print changes nothing, so
+/// passing the season's correction on every document of that season is safe.
+///
 /// Every fact carries [`Claim::SnapshotCount`], the running total the page
 /// states, so a driver who fitted nothing this event still reports the count
 /// carried forward. Every fact also carries the team string printed on its row,
@@ -91,18 +100,23 @@ const HEADER_PAGE: usize = 0;
 ///
 /// Returns [`SnapshotError`]. Either no page carries a table or several do, the
 /// header states no number or more than one, the legend or the column mapping
-/// refuses, the identity columns are not the three a PU document prints, the
+/// refuses, the correction names a code the legend declares beside the code it
+/// means, the identity columns are not the three a PU document prints, the
 /// table holds no data row, or a row prints something other than a number where
 /// a car or a count belongs, or prints no team.
 pub fn parse_snapshot(
     pages: &[Vec<Glyph>],
     round: Round,
+    correction: Option<&Correction>,
     config: &ClusterConfig,
 ) -> Result<Vec<Fact>, SnapshotError> {
     let bands = table_page(pages, config)?;
     let document = document_number(pages, config)?;
 
-    let legend = read_legend(bands.legend())?;
+    let mut legend = read_legend(bands.legend())?;
+    if let Some(correction) = correction {
+        correction.apply(&mut legend)?;
+    }
     let labels = label_columns(bands.table(), &legend)?;
     let identity = identity_columns(&labels)?;
 
@@ -282,7 +296,10 @@ mod tests {
     use domain::{ComponentCode, Team};
 
     use super::*;
-    use crate::error::{BandError, IdentityError};
+    use crate::{
+        corrections,
+        error::{BandError, IdentityError, LabelError},
+    };
 
     /// Advance and width of a glyph, in points. Close to the 9-point Helvetica
     /// the documents print.
@@ -322,10 +339,69 @@ mod tests {
         glyphs
     }
 
+    /// The page's left margin, where the prose and the first legend column
+    /// start.
+    const LEFT_MARGIN: f32 = 42.0;
+
+    /// Baselines a table page prints on, in the order the page reads: the
+    /// prose, the two legend rows, the header, and the first data row.
+    ///
+    /// Every page builder below reads these, so moving one moves them all. The
+    /// builders differ in what they print, never in where.
+    const PROSE_Y: f32 = 530.4;
+    const LEGEND_Y: [f32; 2] = [489.0, 475.2];
+    const HEADER_Y: f32 = 421.9;
+    const FIRST_ROW_Y: f32 = 398.9;
+    /// The drop from one data row's baseline to the next.
+    const ROW_PITCH: f32 = 11.5;
+
+    /// Left edge of the two columns a legend prints its entries in.
+    const LEGEND_X: [f32; 2] = [LEFT_MARGIN, 317.0];
+
     /// Left edge of each table column: the three identity ones, then one per
-    /// component.
+    /// component. A header code starts a few points left of the counts beneath
+    /// it, exactly as the documents print one.
+    const N_X: f32 = 48.0;
+    const CAR_X: f32 = 74.0;
     const DRIVER_X: f32 = 200.0;
+    const CODE_X: [f32; 4] = [303.0, 333.0, 368.0, 400.0];
     const COUNT_X: [f32; 4] = [309.0, 338.0, 371.0, 403.0];
+
+    /// The baseline of the data row at `index`, counting from the first.
+    fn row_y(index: usize) -> f32 {
+        #[expect(clippy::cast_precision_loss, reason = "test geometry; a few rows")]
+        let dropped = ROW_PITCH * index as f32;
+        FIRST_ROW_Y - dropped
+    }
+
+    /// The prose every table page prints between its heading and its legend.
+    ///
+    /// The band split needs it: it is the low-density block that keeps the
+    /// legend off the top of the page.
+    fn prose() -> Vec<Glyph> {
+        word(
+            "The drivers entered in this synthetic championship have used",
+            LEFT_MARGIN,
+            PROSE_Y,
+        )
+    }
+
+    /// The three identity headers every PU document prints left of its
+    /// components.
+    fn identity_header() -> Vec<Glyph> {
+        let mut glyphs = word("N", N_X, HEADER_Y);
+        glyphs.extend(word("Car", CAR_X, HEADER_Y));
+        glyphs.extend(word("Driver", DRIVER_X, HEADER_Y));
+        glyphs
+    }
+
+    /// A data row's three identity cells, left of its counts.
+    fn identity_row(car: &str, team: &str, y: f32) -> Vec<Glyph> {
+        let mut glyphs = word(car, N_X, y);
+        glyphs.extend(word(team, CAR_X, y));
+        glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
+        glyphs
+    }
 
     /// One legend entry drawn as the documents draw it: the code padded out to
     /// its description, both in one run, so the pair binds into one cell.
@@ -340,35 +416,30 @@ mod tests {
 
     /// A table page: prose, a legend, then the table.
     fn table_page_glyphs(rows: &[(&str, &str, [&str; 4])]) -> Vec<Glyph> {
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("TC", "Turbo Charger", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("TC", "Turbo Charger", LEGEND_X[1], LEGEND_Y[0]));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
         glyphs.extend(entry(
             "PU-CE",
             "Power Unit Control Electronics",
-            317.0,
-            475.2,
+            LEGEND_X[1],
+            LEGEND_Y[1],
         ));
 
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("TC", 333.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("PU-CE", 400.0, 421.9));
+        glyphs.extend(identity_header());
+        for (x, code) in CODE_X.into_iter().zip(["ICE", "TC", "ES", "PU-CE"]) {
+            glyphs.extend(word(code, x, HEADER_Y));
+        }
 
         for (index, (car, team, counts)) in rows.iter().enumerate() {
-            #[expect(clippy::cast_precision_loss, reason = "test geometry; a few rows")]
-            let y = 398.9 - 11.5 * index as f32;
-            glyphs.extend(word(car, 48.0, y));
-            glyphs.extend(word(team, 74.0, y));
-            glyphs.extend(word("Ana Ferreira", DRIVER_X, y));
+            let y = row_y(index);
+            glyphs.extend(identity_row(car, team, y));
             for (x, count) in COUNT_X.into_iter().zip(counts) {
                 glyphs.extend(word(count, x, y));
             }
@@ -396,21 +467,72 @@ mod tests {
     /// page a wrapped header makes and the same page with data are the same
     /// geometry by construction, and moving a baseline moves both.
     fn wrapped_header_glyphs() -> Vec<Glyph> {
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("MGU-K", "Motor Generator Unit Kinetic", 317.0, 489.0));
-        glyphs.extend(entry("ES", "Energy Store unit", 42.0, 475.2));
-        glyphs.extend(word("MGU", 330.0, 427.6));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("Driver", DRIVER_X, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("ES", 368.0, 421.9));
-        glyphs.extend(word("-K", 333.0, 416.1));
+        // The two baselines the wrap adds, above and below the line carrying the
+        // most codes. They belong to this page alone.
+        const ABOVE_Y: f32 = 427.6;
+        const BELOW_Y: f32 = 416.1;
+
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry(
+            "MGU-K",
+            "Motor Generator Unit Kinetic",
+            LEGEND_X[1],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
+        // `MGU` sits a shade left of `-K`, as the wrapped header prints it.
+        glyphs.extend(word("MGU", CODE_X[1] - 3.0, ABOVE_Y));
+        glyphs.extend(identity_header());
+        glyphs.extend(word("ICE", CODE_X[0], HEADER_Y));
+        glyphs.extend(word("ES", CODE_X[2], HEADER_Y));
+        glyphs.extend(word("-K", CODE_X[1], BELOW_Y));
+        glyphs
+    }
+
+    /// A table page in the 2026 shape whose legend spells the exhaust code
+    /// `exhaust` while its header spells `EXH`.
+    ///
+    /// The Monaco document prints `EX` there and every other 2026 document
+    /// prints `EXH`, so the two spellings give the same page corrected and
+    /// correct. The geometry does not move between them: both legend entries
+    /// pad the code out to the same column, so a difference in the facts can
+    /// only come from the code.
+    ///
+    /// The page reads the same constants as [`table_page_glyphs`], down to the
+    /// count columns, so moving a baseline moves both rather than leaving this
+    /// one passing on geometry no other test uses.
+    fn exhaust_page(exhaust: &str) -> Vec<Glyph> {
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry(exhaust, "EXHaust set", LEGEND_X[1], LEGEND_Y[0]));
+        glyphs.extend(entry("ES", "Energy Store unit", LEGEND_X[0], LEGEND_Y[1]));
+
+        glyphs.extend(identity_header());
+        for (x, code) in CODE_X.into_iter().zip(["ICE", "EXH", "ES"]) {
+            glyphs.extend(word(code, x, HEADER_Y));
+        }
+
+        for (index, (car, counts)) in [("7", ["2", "3", "1"]), ("8", ["2", "4", "2"])]
+            .into_iter()
+            .enumerate()
+        {
+            let y = row_y(index);
+            glyphs.extend(identity_row(car, "Falcon Racing", y));
+            for (x, count) in COUNT_X.into_iter().zip(counts) {
+                glyphs.extend(word(count, x, y));
+            }
+        }
         glyphs
     }
 
@@ -420,7 +542,19 @@ mod tests {
     }
 
     fn parsed(pages: &[Vec<Glyph>]) -> Vec<Fact> {
-        parse_snapshot(pages, 9, &ClusterConfig::default()).expect("the snapshot must parse")
+        parse_snapshot(pages, 9, None, &ClusterConfig::default()).expect("the snapshot must parse")
+    }
+
+    /// The same, with the correction a 2026 run resolves. Every 2026 document
+    /// meets it, not just the one it repairs.
+    fn corrected(pages: &[Vec<Glyph>]) -> Vec<Fact> {
+        parse_snapshot(
+            pages,
+            9,
+            corrections::for_season(2026),
+            &ClusterConfig::default(),
+        )
+        .expect("the corrected snapshot must parse")
     }
 
     /// Each fact as `(car, component, count)`, which is what the table states.
@@ -582,12 +716,10 @@ mod tests {
         // codes, one column left of where it belongs, so a parser reading along
         // that line would hand this column's count to `ES`.
         let mut glyphs = wrapped_header_glyphs();
-        glyphs.extend(word("7", 48.0, 398.9));
-        glyphs.extend(word("Falcon Racing", 74.0, 398.9));
-        glyphs.extend(word("Ana Ferreira", DRIVER_X, 398.9));
-        glyphs.extend(word("2", 309.0, 398.9));
-        glyphs.extend(word("5", 338.0, 398.9));
-        glyphs.extend(word("1", 371.0, 398.9));
+        glyphs.extend(identity_row("7", "Falcon Racing", row_y(0)));
+        for (x, count) in COUNT_X.into_iter().zip(["2", "5", "1"]) {
+            glyphs.extend(word(count, x, row_y(0)));
+        }
 
         let facts = parsed(&[cover("9"), glyphs]);
 
@@ -626,7 +758,7 @@ mod tests {
         truncated.extend(word("Internal Combustion Engine", 92.0, 489.0));
         truncated.extend(word("1", 300.0, 60.0));
 
-        let refusal = parse_snapshot(&[cover("9"), truncated], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[cover("9"), truncated], 9, None, &ClusterConfig::default());
 
         assert_eq!(
             refusal,
@@ -644,16 +776,19 @@ mod tests {
         // The reason every page's refusal is carried. A table broken in two is
         // a stronger signal than a cover page, and flattening it into "no
         // table" would throw that away.
+        // The second block sits far below the first, with prose between them.
+        const BELOW_Y: f32 = 320.0;
+
         let mut split = two_rows();
-        split.extend(word("Cars below this line of prose", 42.0, 340.0));
-        split.extend(word("9", 48.0, 320.0));
-        split.extend(word("Comet GP", 74.0, 320.0));
-        split.extend(word("Rosa Iglesias", 160.0, 320.0));
-        for x in [309.0, 338.0, 371.0, 403.0] {
-            split.extend(word("3", x, 320.0));
+        split.extend(word("Cars below this line of prose", LEFT_MARGIN, 340.0));
+        split.extend(word("9", N_X, BELOW_Y));
+        split.extend(word("Comet GP", CAR_X, BELOW_Y));
+        split.extend(word("Rosa Iglesias", 160.0, BELOW_Y));
+        for x in COUNT_X {
+            split.extend(word("3", x, BELOW_Y));
         }
 
-        let refusal = parse_snapshot(&[cover("9"), split], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[cover("9"), split], 9, None, &ClusterConfig::default());
 
         assert!(
             matches!(
@@ -669,7 +804,12 @@ mod tests {
     fn refuses_a_document_whose_pages_both_carry_a_table() {
         // Taking the first would pick one of two plausible tables with nothing
         // to tell them apart, which is the failure the epic exists to prevent.
-        let refusal = parse_snapshot(&[two_rows(), two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(
+            &[two_rows(), two_rows()],
+            9,
+            None,
+            &ClusterConfig::default(),
+        );
 
         assert_eq!(
             refusal,
@@ -679,7 +819,7 @@ mod tests {
 
     #[test]
     fn refuses_a_document_that_states_no_number() {
-        let refusal = parse_snapshot(&[two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[two_rows()], 9, None, &ClusterConfig::default());
 
         assert_eq!(refusal, Err(SnapshotError::NoDocumentNumber));
     }
@@ -693,7 +833,7 @@ mod tests {
         ambiguous.extend(word("Document", 388.3, 600.0));
         ambiguous.extend(word("14", 450.9, 600.0));
 
-        let refusal = parse_snapshot(&[ambiguous, two_rows()], 9, &ClusterConfig::default());
+        let refusal = parse_snapshot(&[ambiguous, two_rows()], 9, None, &ClusterConfig::default());
 
         assert_eq!(
             refusal,
@@ -781,7 +921,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::CarNotANumber {
                 row: 1,
                 text: "TBC".to_owned()
@@ -802,7 +942,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::MissingTeam { row: 1, car: 7 })
         );
     }
@@ -817,6 +957,7 @@ mod tests {
             parse_snapshot(
                 &[cover("9"), wrapped_header_glyphs()],
                 9,
+                None,
                 &ClusterConfig::default()
             ),
             Err(SnapshotError::NoDataRows { header_rows: 3 })
@@ -831,7 +972,7 @@ mod tests {
         ];
 
         assert_eq!(
-            parse_snapshot(&pages, 9, &ClusterConfig::default()),
+            parse_snapshot(&pages, 9, None, &ClusterConfig::default()),
             Err(SnapshotError::CountNotANumber {
                 row: 1,
                 car: 7,
@@ -846,24 +987,28 @@ mod tests {
         // Without a driver column the roles cannot be assigned by position, so
         // the team witness would come from whichever column happened to sit
         // second.
-        let mut glyphs = word(
-            "The drivers entered in this synthetic championship have used",
-            42.0,
-            530.4,
-        );
-        glyphs.extend(entry("ICE", "Internal Combustion Engine", 42.0, 489.0));
-        glyphs.extend(entry("TC", "Turbo Charger", 42.0, 475.2));
-        glyphs.extend(word("N", 48.0, 421.9));
-        glyphs.extend(word("Car", 74.0, 421.9));
-        glyphs.extend(word("ICE", 303.0, 421.9));
-        glyphs.extend(word("TC", 333.0, 421.9));
-        glyphs.extend(word("7", 48.0, 398.9));
-        glyphs.extend(word("Falcon Racing", 74.0, 398.9));
-        glyphs.extend(word("2", 309.0, 398.9));
-        glyphs.extend(word("3", 338.0, 398.9));
+        // The standard page, minus its driver column.
+        let mut glyphs = prose();
+        glyphs.extend(entry(
+            "ICE",
+            "Internal Combustion Engine",
+            LEGEND_X[0],
+            LEGEND_Y[0],
+        ));
+        glyphs.extend(entry("TC", "Turbo Charger", LEGEND_X[0], LEGEND_Y[1]));
+        glyphs.extend(word("N", N_X, HEADER_Y));
+        glyphs.extend(word("Car", CAR_X, HEADER_Y));
+        glyphs.extend(word("7", N_X, row_y(0)));
+        glyphs.extend(word("Falcon Racing", CAR_X, row_y(0)));
+        for (index, code) in ["ICE", "TC"].into_iter().enumerate() {
+            glyphs.extend(word(code, CODE_X[index], HEADER_Y));
+        }
+        for (index, count) in ["2", "3"].into_iter().enumerate() {
+            glyphs.extend(word(count, COUNT_X[index], row_y(0)));
+        }
 
         assert_eq!(
-            parse_snapshot(&[cover("9"), glyphs], 9, &ClusterConfig::default()),
+            parse_snapshot(&[cover("9"), glyphs], 9, None, &ClusterConfig::default()),
             Err(SnapshotError::Identity(
                 IdentityError::UnexpectedIdentityColumns { found: 2 }
             ))
@@ -874,7 +1019,8 @@ mod tests {
     fn tags_every_fact_with_the_round_the_caller_passes() {
         // A snapshot names its event and never numbers it, so the round is the
         // caller's to supply.
-        let facts = parse_snapshot(&document(), 4, &ClusterConfig::default()).expect("must parse");
+        let facts =
+            parse_snapshot(&document(), 4, None, &ClusterConfig::default()).expect("must parse");
 
         assert!(facts.iter().all(|fact| fact.round == 4));
     }
@@ -891,8 +1037,65 @@ mod tests {
     #[test]
     fn refuses_a_document_with_no_pages() {
         assert_eq!(
-            parse_snapshot(&[], 9, &ClusterConfig::default()),
+            parse_snapshot(&[], 9, None, &ClusterConfig::default()),
             Err(SnapshotError::NoTablePage { refusals: vec![] })
         );
+    }
+
+    #[test]
+    fn refuses_a_stale_legend_code_without_its_correction() {
+        // The 2026 Monaco document, and the only refusal across the 56 held
+        // locally. `EX` lands on no column and the `EXH` column matches no
+        // legend code, so the mapping refuses rather than pick a spelling.
+        let refusal = parse_snapshot(
+            &[cover("9"), exhaust_page("EX")],
+            9,
+            None,
+            &ClusterConfig::default(),
+        );
+
+        assert_eq!(
+            refusal,
+            Err(SnapshotError::Label(LabelError::HeaderDoesNotMatchLegend {
+                unmatched: vec!["EX".to_owned()]
+            }))
+        );
+    }
+
+    #[test]
+    fn reads_a_stale_legend_code_as_the_document_a_correction_makes_it() {
+        // Whole facts, not counts: any mark that a correction ran would have to
+        // ride on a fact, so equality with the correctly printed document is
+        // what proves none does.
+        let facts = corrected(&[cover("9"), exhaust_page("EX")]);
+
+        assert_eq!(facts, parsed(&[cover("9"), exhaust_page("EXH")]));
+    }
+
+    #[test]
+    fn emits_the_code_the_header_spells() {
+        let facts = corrected(&[cover("9"), exhaust_page("EX")]);
+
+        assert_eq!(
+            counts(&facts),
+            [
+                (7, "ICE", 2),
+                (7, "EXH", 3),
+                (7, "ES", 1),
+                (8, "ICE", 2),
+                (8, "EXH", 4),
+                (8, "ES", 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn leaves_a_correctly_printed_document_of_the_same_season_untouched() {
+        // The season's correction reaches every document of that season, so the
+        // other 2026 snapshots meet it too. Each prints `EXH` already, so the
+        // rename finds nothing and the parse runs as though no correction came.
+        let pages = [cover("9"), exhaust_page("EXH")];
+
+        assert_eq!(corrected(&pages), parsed(&pages));
     }
 }
