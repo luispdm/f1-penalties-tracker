@@ -19,11 +19,11 @@ rust-version = "1.97"
 # Dependencies land with the epic that first needs them, never here up front.
 [workspace.dependencies]
 # Reader, shipped: pure-Rust PDF text extraction behind the `extract` adapter.
-pdf_oxide = "0.3.74"
+pdf_oxide = "0.3.77"
 # Derive-based error types.
 thiserror = "2"
 # Writer, test-support only: synthetic PDF fixtures. Never a shipped dependency.
-printpdf = { version = "0.11.3", default-features = false }
+printpdf = { version = "0.12.5", default-features = false }
 # Property testing for the clustering.
 proptest = "1"
 

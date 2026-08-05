@@ -117,18 +117,18 @@ Either way a parser matching a hardcoded `"PU-CE"` reads the wrong column, which
 is why the codes come from the legend instead.
 
 **This fixture substitutes U+00AD SOFT HYPHEN**, because no round trip can carry
-U+0002 back out. Two blockers sit in series.
+U+0002 back out.
 
-The writer's blocker can be lifted. `render_table` draws with the built-in
+The reader is the blocker, and an embedded font buys nothing against it.
+pdf_oxide 0.3.77 rejects control characters from the ToUnicode map outright, so
+U+0002 comes back as U+FFFD however the file spells it. printpdf 0.12.5 writes
+the entry; nothing on the reading side accepts it.
+
+The writer adds a second, liftable limit. `render_table` draws with the built-in
 Helvetica, whose WinAnsi encoding turns every unmappable character into `?`, so
-writing `PU\u{2}CE` reads back as `PU?CE`. U+2011 and U+2212 come back as `?`
-for the same reason; U+00AD and U+2013 survive because WinAnsi maps them. An
-embedded font lifts that limit, and printpdf 0.12.5 writes U+0002 into the
-ToUnicode CMap; the pinned 0.11.3 drops that entry while building it.
-
-The reader's cannot. pdf_oxide 0.3.74 returns U+FFFD for U+0002 however the file
-spells it, so no test reading this fixture could assert the character even from
-a perfect writer. Embedding a font to carry U+0002 buys nothing.
+writing `PU\u{2}CE` reads back as `PU?CE`. U+00AD and U+2013 survive it because
+WinAnsi maps them; U+2011 and U+2212 come back as `?`. An embedded font lifts
+that limit and leaves the reader's standing.
 
 U+00AD stands in faithfully: invisible when rendered, not U+002D, and fatal to a
 hardcoded literal. The real U+0002 is asserted in the `ingest` unit tests, which
